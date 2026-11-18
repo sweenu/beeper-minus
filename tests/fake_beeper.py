@@ -175,11 +175,17 @@ def make_app(state="ready"):
         {"type": "display_and_wait", "instructions": "In WhatsApp, open Linked devices, tap Link with phone number, and type this code", "display": {"type": "code", "data": "FAKE-CODE"}},
     ]
     cookies = [{"type": "cookies", "url": "https://www.linkedin.com/login", "instructions": "Sign in to LinkedIn, then paste these cookies", "fields": [{"id": "li_at", "name": "li_at", "type": "cookie"}, {"id": "jsession", "name": "JSESSIONID", "type": "cookie"}]}]
+    telegram = bridge("telegram", "Telegram", "cloud", [])
+    telegram["accounts"].append(account(telegram))
     discord = bridge("discordgo", "Discord", "cloud", [])
     discord["accounts"].append(account(discord, "connection_required"))
     bridges = app["bridges"] = {b["id"]: b for b in [
         bridge("local-whatsapp", "WhatsApp", "local", {"qr": ("QR code", qr), "phone": ("Pairing code", phone)}),
         bridge("local-linkedin", "LinkedIn", "local", {"cookies": ("Browser cookies", cookies)}),
+        # Signal is still registered to another device; Telegram already works from Beeper Cloud.
+        bridge("local-signal", "Signal", "local", {}) | {"status": "limit_reached"},
+        telegram,
+        bridge("local-telegram", "Telegram", "local", {}) | {"status": "limit_reached"},
         discord,
     ]}
     sessions = {}

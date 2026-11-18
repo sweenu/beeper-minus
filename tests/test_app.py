@@ -60,8 +60,8 @@ async def main():
                     "/api/beeper/v1/bridges/local-whatsapp/%6Cogins/x/remove"):
             async with http.get(api + bad) as r:
                 assert r.status == 403, (bad, r.status)
-        async with http.get(f"{api}/") as r:
-            assert "hi" in await r.text()
+        async with http.get(f"{api}/", headers={"If-Modified-Since": "Thu, 01 Jan 1970 00:00:01 GMT"}) as r:
+            assert r.status == 200 and "hi" in await r.text() and r.headers["Cache-Control"] == "no-store", r.headers
         async with http.get(f"{api}/api/snoozes", headers={"Host": "evil.example"}) as r:
             assert r.status == 403, r.status  # DNS rebinding
         # Other websites can make the browser send requests, but not change anything.

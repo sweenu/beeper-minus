@@ -19,8 +19,14 @@
 
   const enc = encodeURIComponent
   const base = (id: string) => `/api/beeper/v1/bridges/${enc(id)}`
-  // Cloud networks are listed only once connected: they're added from Beeper's own apps.
-  const shown = $derived((bridges ?? []).filter((b) => b.accounts.length || b.provider === 'local'))
+  const network = (b: Bridge) => b.network ?? b.displayName
+  // Cloud networks are listed only once connected: they're added from Beeper's own apps. An on-device
+  // network already working through another bridge (Telegram in Beeper Cloud...) needs nothing here.
+  const shown = $derived(
+    (bridges ?? []).filter(
+      (b) => b.accounts.length || (b.provider === 'local' && !(bridges ?? []).some((o) => o.accounts.length && network(o) === network(b))),
+    ),
+  )
   const step = $derived(linking?.session?.currentStep)
 
   const load = () => beeper<{ items: Bridge[] }>('/bridges').then((r) => (bridges = r.items), (e) => (error = e.message))
@@ -172,12 +178,21 @@
       <li class="card account">
         <div class="line">
           <strong>{b.displayName}</strong>
-          <span class="muted">not connected</span>
+          <span class:muted={b.status !== 'limit_reached'} class:error={b.status === 'limit_reached'}>
+            {b.status === 'limit_reached' ? 'account limit reached' : 'not connected'}
+          </span>
         </div>
         <div class="line">
           <span class="meta">on this server</span>
           {#if b.status === 'available'}<button disabled={!!linking} onclick={() => start(b)}>Connect</button>{/if}
         </div>
+        {#if b.status === 'limit_reached'}
+          <p class="meta">
+            Your Beeper account already has a {b.displayName} account, maybe linked on another device (like a Beeper Server you
+            reset), and your plan allows no more. Remove that one in Beeper's settings on your phone or computer, then reload this
+            page to link {b.displayName} here.
+          </p>
+        {/if}
       </li>
     {/if}
   {:else}

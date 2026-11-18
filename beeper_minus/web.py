@@ -171,7 +171,8 @@ def make_app(beeper, db, transcriber, static_dir, save_token, hosts=("localhost"
 
     @routes.get("/")
     async def home(request):
-        return web.FileResponse(index)
+        # Nix store files all date from 1970, so a browser revalidating would be told its old copy is current.
+        return web.Response(body=index.read_bytes(), content_type="text/html", headers={"Cache-Control": "no-store"})
 
     @web.middleware
     async def known_host(request, handler):

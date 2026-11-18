@@ -52,6 +52,7 @@ export interface Bridge {
   id: string
   displayName: string
   provider: 'cloud' | 'self-hosted' | 'local' | 'platform-sdk'
+  network?: string
   status: string
   accounts: Account[]
 }
