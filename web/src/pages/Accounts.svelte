@@ -75,11 +75,13 @@
   // Each answer is the session's next state. A wait step (QR code, pairing code) is answered by
   // Beeper Server only once the phone confirmed, or with a fresh code when the old one expired.
   async function run(call: () => Promise<LoginSession>) {
+    // Cancel, then Connect again, starts a new linking while this one's wait may still be answered.
+    const mine = linking
     busy = true
     error = ''
     try {
       let s = await call()
-      while (linking) {
+      while (linking && linking === mine) {
         linking.session = s
         const next = s.currentStep
         fields = next && 'fields' in next ? Object.fromEntries(next.fields.map((f) => [f.id, f.initialValue ?? ''])) : {}
@@ -90,14 +92,14 @@
           body: { type: 'display_and_wait' },
         })
       }
-      if (linking?.session?.status === 'complete' || linking?.session?.status === 'cancelled') {
+      if (linking && linking === mine && (linking.session?.status === 'complete' || linking.session?.status === 'cancelled')) {
         linking = null
         await load()
       }
     } catch (e) {
-      if (linking) error = (e as Error).message
+      if (linking && linking === mine) error = (e as Error).message
     } finally {
-      busy = false
+      if (linking === mine || !linking) busy = false
     }
   }
 

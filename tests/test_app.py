@@ -6,14 +6,15 @@ import logging
 import os
 import stat
 import tempfile
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from aiohttp import ClientSession, web
+from aiohttp import ClientResponseError, ClientSession, web
 
 from beeper_minus import scheduler
 from beeper_minus import web as bm_web
 from beeper_minus.beeper import Beeper
-from beeper_minus.db import get_kv, open_db, rows
+from beeper_minus.db import get_kv, open_db, rows, set_kv
 from beeper_minus.transcribe import Transcriber, ts
 
 from . import fake_beeper
@@ -151,6 +152,11 @@ async def main():
         assert len(messages[fake_beeper.NOTE]) == notes  # done once, not posted again
         async with http.post(f"{api}/api/transcriptions", json={"chatID": alice, "messageID": "a1"}) as r:
             assert r.status == 400  # no audio
+        # The worker and a click asking for the same note at once: transcribed and posted once.
+        twice = Transcriber({**cfg, "notes_to_self_chat_id": fake_beeper.NOTE}, beeper, open_db(":memory:"))
+        notes = len(messages[fake_beeper.NOTE])
+        await asyncio.gather(twice.transcribe(messages[alice][2]), twice.transcribe(messages[alice][2]))
+        assert len(messages[fake_beeper.NOTE]) == notes + 1, messages[fake_beeper.NOTE][notes:]
 
     async def idle(until=lambda: True):
         for _ in range(50):
@@ -184,6 +190,31 @@ async def main():
     assert "**Dad** in *Family 🏡*" in messages[fake_beeper.NOTE][-1]["text"]
     assert rows(db, "select 1 from transcriptions where message_id = 'f4'") and get_kv(db, "retry") is None
     listener.cancel()
+
+    # Back after downtime, the first catch-up fails: the notes missed meanwhile are still caught up later,
+    # whether the downtime is remembered as "alive" or as an earlier failure ("retry").
+    now = datetime.now(timezone.utc)
+    missed = fake_beeper.voice("f5", "!family:beeper.com", 30, sender="Gran")
+    messages["!family:beeper.com"].append(missed)  # arrived while down: never announced
+    for state in ({"alive": now - timedelta(hours=1)}, {"alive": now, "retry": now - timedelta(minutes=50)}):
+        back_db = open_db(":memory:")
+        for k, v in state.items():
+            set_kv(back_db, k, v.isoformat())
+        back = Transcriber(cfg, beeper, back_db)
+        fake["fail"]["search"] = 1
+        try:
+            await back.listen()
+            raise AssertionError("catch-up didn't fail")
+        except ClientResponseError:
+            pass
+        assert back.catch_up_since() < ts(missed), ("a failed catch-up moved past the downtime", state)
+        listener = asyncio.create_task(back.run())
+        for _ in range(100):
+            await asyncio.sleep(0.1)
+            if rows(back_db, "select 1 from transcriptions where message_id = 'f5'"):
+                break
+        listener.cancel()
+        assert rows(back_db, "select 1 from transcriptions where message_id = 'f5'"), ("missed note never transcribed", state)
     await beeper.close()
     await runner.cleanup()
     await fake_runner.cleanup()

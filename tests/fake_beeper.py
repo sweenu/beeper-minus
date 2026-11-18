@@ -81,6 +81,7 @@ def make_app(state="ready"):
     app = web.Application()
     chats, messages = seed()
     app["chats"], app["messages"], app["sockets"] = chats, messages, []
+    app["fail"] = {"search": 0}  # requests to refuse next, to test recovery
     # Sign-in and encryption setup, as GET /v1/app/setup reports it.
     app["setup"] = {"state": state, "e2ee": {}, "verification": None}
     routes = web.RouteTableDef()
@@ -284,6 +285,9 @@ def make_app(state="ready"):
 
     @routes.get("/v1/chats/search")
     async def search(request):
+        if app["fail"]["search"]:  # Beeper Server still syncing, say
+            app["fail"]["search"] -= 1
+            raise web.HTTPServiceUnavailable()
         inbox, words = request.query.get("inbox"), request.query.get("query", "").lower().split()
         # Like Beeper's "titles" scope: every word in the title or the network name.
         items = [

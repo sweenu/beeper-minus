@@ -80,7 +80,7 @@ def format_note(row, chat):
     sent = datetime.fromtimestamp(row["sent_at"] / 1000).astimezone().strftime("%a %H:%M")
     secs = row["duration"]
     quoted = "\n".join(f"> {line}" for line in (row["text"] or "(silence)").splitlines())
-    return f"🎙 {who} · {chat.get('network', '?')} · {sent} · {secs // 60}:{secs % 60:02} · {row['language']}\n{quoted}"
+    return f"🎙 {who} · {chat.get('network', '?')} · {sent} · {secs // 60}:{secs % 60:02} · {row['language'] or '?'}\n{quoted}"
 
 
 def ts(msg):
@@ -150,7 +150,7 @@ class Transcriber:
             raise ValueError("message has no audio")
         src = (await self.beeper.call("POST", "/v1/assets/download", {"url": att["id"]}))["srcURL"]
         async with self.lock:
-            # The worker and the web app can both ask for the same note: do it once.
+            # The worker and the web app can both ask for the same note: do it once, up to the stored row.
             done = rows(self.db, "select * from transcriptions where chat_id = ? and message_id = ?", msg["chatID"], msg["id"])
             if done:
                 return done[0]
@@ -162,27 +162,27 @@ class Transcriber:
                 # Bridges rarely fill in the attachment duration; 16 kHz mono s16 is 32000 B/s.
                 secs = round(Path(wav).stat().st_size / 32000)
                 lang, text = await self.engine(wav)
-        chat = chat or await self.beeper.chat(msg["chatID"])
-        sent_at = int(ts(msg).timestamp() * 1000)
-        row = {
-            "chat_id": msg["chatID"],
-            "message_id": msg["id"],
-            "alias": alias(msg),
-            "chat_title": chat.get("title"),
-            "network": chat.get("network"),
-            "sender": msg.get("senderName"),
-            "sent_at": sent_at,
-            "language": lang,
-            "duration": secs,
-            "text": text,
-            "created_at": now_ms(),
-        }
-        # Post first: if it fails, no row is stored and the note is retried instead of never posted.
-        if self.notes_to_self:
-            await self.beeper.send(await self.note_chat(), format_note(row, chat))
-        self.db.execute(f"insert or replace into transcriptions ({', '.join(row)}) values ({', '.join('?' * len(row))})", tuple(row.values()))
-        log.info("transcribed %s/%s (%s)", row["chat_id"], row["message_id"], lang)
-        return row
+            chat = chat or await self.beeper.chat(msg["chatID"])
+            sent_at = int(ts(msg).timestamp() * 1000)
+            row = {
+                "chat_id": msg["chatID"],
+                "message_id": msg["id"],
+                "alias": alias(msg),
+                "chat_title": chat.get("title"),
+                "network": chat.get("network"),
+                "sender": msg.get("senderName"),
+                "sent_at": sent_at,
+                "language": lang,
+                "duration": secs,
+                "text": text,
+                "created_at": now_ms(),
+            }
+            # Post first: if it fails, no row is stored and the note is retried instead of never posted.
+            if self.notes_to_self:
+                await self.beeper.send(await self.note_chat(), format_note(row, chat))
+            self.db.execute(f"insert or replace into transcriptions ({', '.join(row)}) values ({', '.join('?' * len(row))})", tuple(row.values()))
+            log.info("transcribed %s/%s (%s)", row["chat_id"], row["message_id"], lang)
+            return row
 
     # --- automatic transcription of incoming voice notes ---
 
@@ -209,7 +209,7 @@ class Transcriber:
         return max(now - self.max_age, min(times)) if times else now
 
     async def catch_up(self, since):
-        set_kv(self.db, "retry", None)  # failures from here on re-add it
+        retry = get_kv(self.db, "retry")
         chats, cursor = [], {}
         while True:
             page = await self.beeper.call("GET", "/v1/chats/search", lastActivityAfter=since.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"), limit=200, **cursor)
@@ -227,6 +227,10 @@ class Transcriber:
                 if not page.get("hasMore") or oldest is None or oldest <= since:
                     break
                 cursor = {"cursor": page["oldestCursor"], "direction": "before"}
+        # Everything since then is queued now: failures from here on re-add it. Clear it only once the
+        # pages loaded, and only if no failure moved it meanwhile.
+        if get_kv(self.db, "retry") == retry:
+            set_kv(self.db, "retry", None)
         for msg in sorted(found, key=ts):
             self.queue.put_nowait(msg)
         log.info("catch-up since %s: scanned %d chats", f"{since:%Y-%m-%d %H:%M}", len(chats))
@@ -251,7 +255,8 @@ class Transcriber:
                     pass  # no usable timestamp: nothing to reach back to
 
     async def listen(self):
-        since = self.catch_up_since()  # read before connecting: every event below moves "alive" forward
+        since = self.catch_up_since()  # read before connecting: events below move "alive" forward
+        caught_up = False
         url = self.beeper.url.replace("http", "ws", 1) + "/v1/ws"
         async with self.beeper.http.ws_connect(url, max_msg_size=0, heartbeat=30) as ws:
             async for raw in ws:
@@ -263,11 +268,13 @@ class Transcriber:
                 elif event["type"] == "subscriptions.updated":
                     # Delivery is at-most-once with no replay, so reconcile over HTTP once subscribed.
                     await self.catch_up(since)
+                    caught_up = True
                 elif event["type"] == "message.upserted":
                     for msg in event.get("entries") or []:
                         self.queue.put_nowait(msg)
-                # Only move forward once everything older is handled, so a stop mid-queue is retried.
-                if self.queue.empty() and not self.busy:
+                # Only move forward once everything older is handled, so a stop mid-queue, or a
+                # catch-up that failed, is retried.
+                if caught_up and self.queue.empty() and not self.busy:
                     set_kv(self.db, "alive", datetime.now(timezone.utc).isoformat())
 
     async def run(self):
