@@ -11,8 +11,8 @@ from aiohttp import ClientSession, web
 from beeper_minus import scheduler
 from beeper_minus import web as bm_web
 from beeper_minus.beeper import Beeper
-from beeper_minus.db import open_db, rows
-from beeper_minus.transcribe import Transcriber
+from beeper_minus.db import get_kv, open_db, rows
+from beeper_minus.transcribe import Transcriber, ts
 
 from . import fake_beeper
 
@@ -105,26 +105,44 @@ async def main():
             assert r.status == 200, t
         assert t["text"] == "Bonjour, ça va ?" and t["language"] == "fr" and t["duration"] == 3, t
         assert "Bonjour, ça va ?" in messages[fake_beeper.NOTE][-1]["text"]
+        notes = len(messages[fake_beeper.NOTE])
+        async with http.post(f"{api}/api/transcriptions", json={"chatID": alice, "messageID": "a3"}) as r:
+            assert (await r.json())["text"] == "Bonjour, ça va ?"
+        assert len(messages[fake_beeper.NOTE]) == notes  # done once, not posted again
         async with http.post(f"{api}/api/transcriptions", json={"chatID": alice, "messageID": "a1"}) as r:
             assert r.status == 400  # no audio
 
+    async def idle(until=lambda: True):
+        for _ in range(50):
+            await asyncio.sleep(0.1)
+            if until() and transcriber.queue.empty() and not transcriber.busy:
+                return
+
     # Automatic: a voice note arriving over the websocket gets transcribed once.
     listener = asyncio.create_task(transcriber.run())
-    for _ in range(50):
-        await asyncio.sleep(0.1)
-        if fake["sockets"] and transcriber.queue.empty() and not transcriber.busy:
-            break
+    await idle(lambda: fake["sockets"])
     notes = len(messages[fake_beeper.NOTE])
+    transcriber.queue.put_nowait({"id": "bad", "chatID": alice})  # no timestamp: skipped, worker lives on
     await fake_beeper.push(fake, fake_beeper.voice("f2", "!family:beeper.com", 0, sender="Mum"))
     await fake_beeper.push(fake, fake_beeper.voice("f3", "!family:beeper.com", 0, sender="Me", is_sender=True))
     await fake_beeper.push(fake, fake_beeper.voice("o2", "!old:beeper.com", 0, sender="Carol"))  # archived chat
     await fake_beeper.push(fake, fake_beeper.voice("a3", alice, 6))  # already transcribed
-    for _ in range(50):
-        await asyncio.sleep(0.1)
-        if len(messages[fake_beeper.NOTE]) > notes and transcriber.queue.empty() and not transcriber.busy:
-            break
+    await idle(lambda: len(messages[fake_beeper.NOTE]) > notes)
     assert len(messages[fake_beeper.NOTE]) == notes + 1, messages[fake_beeper.NOTE][notes:]
     assert "**Mum** in *Family 🏡*" in messages[fake_beeper.NOTE][-1]["text"]
+
+    # Posting to Note to self fails: nothing is stored, and the next catch-up reaches back and posts it.
+    transcriber.note_chat_id = "!gone:beeper.com"
+    f4 = fake_beeper.voice("f4", "!family:beeper.com", 0, sender="Dad")
+    await fake_beeper.push(fake, f4)
+    await idle(lambda: get_kv(db, "retry"))
+    assert not rows(db, "select 1 from transcriptions where message_id = 'f4'")
+    assert transcriber.catch_up_since() < ts(f4)
+    transcriber.note_chat_id = fake_beeper.NOTE
+    await transcriber.catch_up(transcriber.catch_up_since())
+    await idle(lambda: len(messages[fake_beeper.NOTE]) > notes + 1)
+    assert "**Dad** in *Family 🏡*" in messages[fake_beeper.NOTE][-1]["text"]
+    assert rows(db, "select 1 from transcriptions where message_id = 'f4'") and get_kv(db, "retry") is None
     listener.cancel()
     await beeper.close()
     await runner.cleanup()

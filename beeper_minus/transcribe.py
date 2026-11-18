@@ -86,6 +86,11 @@ def ts(msg):
     return datetime.fromisoformat(msg["timestamp"])
 
 
+def alias(msg):
+    # A voice note keeps its sender and send time when it gets new IDs (see db.py).
+    return f"{int(ts(msg).timestamp())}/{''.join((msg.get('senderName') or '?').split())}"
+
+
 class Transcriber:
     def __init__(self, cfg, beeper, db):
         self.beeper = beeper
@@ -118,6 +123,10 @@ class Transcriber:
             raise ValueError("message has no audio")
         src = (await self.beeper.call("POST", "/v1/assets/download", {"url": att["id"]}))["srcURL"]
         async with self.lock:
+            # The worker and the web app can both ask for the same note: do it once.
+            done = rows(self.db, "select * from transcriptions where chat_id = ? and message_id = ?", msg["chatID"], msg["id"])
+            if done:
+                return done[0]
             with tempfile.TemporaryDirectory() as d:
                 path = await self.fetch(src, f"{d}/media")
                 wav = f"{d}/audio.wav"
@@ -131,7 +140,7 @@ class Transcriber:
         row = {
             "chat_id": msg["chatID"],
             "message_id": msg["id"],
-            "alias": f"{sent_at // 1000}/{''.join((msg.get('senderName') or '?').split())}",
+            "alias": alias(msg),
             "chat_title": chat.get("title"),
             "network": chat.get("network"),
             "sender": msg.get("senderName"),
@@ -141,9 +150,10 @@ class Transcriber:
             "text": text,
             "created_at": now_ms(),
         }
-        self.db.execute(f"insert or replace into transcriptions ({', '.join(row)}) values ({', '.join('?' * len(row))})", tuple(row.values()))
+        # Post first: if it fails, no row is stored and the note is retried instead of never posted.
         if self.note_chat_id:
             await self.beeper.send(self.note_chat_id, format_note(row, chat))
+        self.db.execute(f"insert or replace into transcriptions ({', '.join(row)}) values ({', '.join('?' * len(row))})", tuple(row.values()))
         log.info("transcribed %s/%s (%s)", row["chat_id"], row["message_id"], lang)
         return row
 
@@ -156,8 +166,7 @@ class Transcriber:
         # An existing transcript means Beeper already did the job.
         if att is None or not (att.get("isVoiceNote") or msg.get("type") == "VOICE") or att.get("transcription"):
             return False
-        alias = f"{int(ts(msg).timestamp())}/{''.join((msg.get('senderName') or '?').split())}"
-        return not rows(self.db, "select 1 from transcriptions where (chat_id = ? and message_id = ?) or alias = ?", msg["chatID"], msg["id"], alias)
+        return not rows(self.db, "select 1 from transcriptions where (chat_id = ? and message_id = ?) or alias = ?", msg["chatID"], msg["id"], alias(msg))
 
     def mark_retry(self, msg):
         # "retry" holds the oldest failed message, so the next catch-up reaches back to it.
@@ -200,17 +209,20 @@ class Transcriber:
             self.busy = False
             msg = await self.queue.get()
             self.busy = True
-            if not self.wanted(msg):
-                continue
             try:
+                if not self.wanted(msg):
+                    continue
                 chat = await self.beeper.chat(msg["chatID"])
                 # Archived chats are ignored, unless they're only snoozed.
                 if chat.get("isArchived") and not rows(self.db, "select 1 from snoozes where chat_id = ?", msg["chatID"]):
                     continue
                 await self.transcribe(msg, chat)
             except Exception as e:
-                log.warning("failed %s/%s: %r", msg["chatID"], msg["id"], e)
-                self.mark_retry(msg)
+                log.warning("failed %s/%s: %r", msg.get("chatID"), msg.get("id"), e)
+                try:
+                    self.mark_retry(msg)
+                except (KeyError, ValueError):
+                    pass  # no usable timestamp: nothing to reach back to
 
     async def listen(self):
         since = self.catch_up_since()  # read before connecting: every event below moves "alive" forward
@@ -239,4 +251,7 @@ class Transcriber:
                 await self.listen()
             except (OSError, aiohttp.ClientError, asyncio.TimeoutError) as e:
                 log.warning("websocket: %r, reconnecting", e)
+            except Exception:
+                # A malformed event or page must not take the scheduler and web app down with it.
+                log.exception("websocket")
             await asyncio.sleep(10)
