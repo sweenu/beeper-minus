@@ -20,7 +20,10 @@ let
         ]
       );
     };
-    npmDepsHash = "sha256-zplOPoBvyHzYstQcC45uGwHLPne+xrRKxFlqf2UjLho=";
+    npmDepsHash = "sha256-eJAUgPTSk8qyFNUBkn4ccOAD8prHE/ZFYvK6Qhtx1FI=";
+    # The formatting allowlist that keeps message HTML harmless.
+    doCheck = true;
+    checkPhase = "npm test";
     installPhase = "cp -r dist $out";
   };
 in

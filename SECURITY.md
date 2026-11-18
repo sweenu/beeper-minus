@@ -61,7 +61,10 @@ Pitfalls:
   there.
 - **The recovery key can't be replaced through the app.** Creating a recovery key replaces the old one
   and cuts access to your encrypted history. The app only allows it while the account has none at all.
-- **Message text is displayed as text**, never as HTML.
+- **Message formatting is rebuilt, never pasted in.** Formatted messages arrive as HTML. The app
+  recreates only basic formatting (bold, italic, code, quotes, lists, line breaks) and links to
+  `http`, `https` or `mailto` addresses, without any other attribute. Scripts, images, styles and
+  everything else are reduced to plain text or dropped (`web/src/lib/richtext.ts`, tested by `npm test`).
 - **Logs** contain chat and message IDs, never message text or the token.
 
 ## Setting Beeper Server up

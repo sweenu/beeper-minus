@@ -8,5 +8,7 @@
     "noEmit": true,
     "types": ["svelte", "vite/client"]
   },
-  "include": ["src/**/*.ts", "src/**/*.svelte"]
+  "include": ["src/**/*.ts", "src/**/*.svelte"],
+  // Tests run on Node (npm test), not in the app.
+  "exclude": ["src/**/*.test.ts"]
 }

@@ -126,4 +126,5 @@ python -m tests.test_app        # end-to-end test against a fake Beeper
 python -m tests.fake_beeper &   # fake Beeper on :23373 with token "test-token"
 python -m beeper_minus config.toml
 cd web && npm install && npm run dev   # proxies /api to :8099
+npm test && npm run check              # web: formatting allowlist, types
 ```

@@ -61,7 +61,13 @@ def seed():
         text("a4", "!alice:beeper.com", 5, "Listen to this ☝️"),
     ]
     messages["!family:beeper.com"] = [text("f1", "!family:beeper.com", 30, "Sunday lunch at noon", sender="Mum")]
-    messages["!bob:beeper.com"] = [text("b1", "!bob:beeper.com", 120, "Thanks for the help")]
+    messages["!bob:beeper.com"] = [
+        text("b0", "!bob:beeper.com", 130, "Is 3 < 5? <3"),
+        # Formatted messages arrive as HTML: the formatting renders, nothing else does.
+        text("b1", "!bob:beeper.com", 120, '<em>italic</em> <strong>bold</strong> <code>code</code><br>'
+             '<img src=x onerror="alert(1)"><script>alert(2)</script><a href="javascript:alert(3)">js link</a> '
+             '<a href="https://example.com" onclick="alert(4)">safe link</a> <span style="color:red">Thanks for the help</span>'),
+    ]
     messages["!old:beeper.com"] = [text("o1", "!old:beeper.com", 6000, "Shipped 🎉", sender="Carol")]
     return chats, messages
 
@@ -284,7 +290,8 @@ def make_app(state="ready"):
             with_preview(c) for c in chats.values()
             if (inbox is None or (inbox == "archive") == c["isArchived"]) and all(w in f"{c['title']} {c['network']}".lower() for w in words)
         ]
-        items.sort(key=lambda c: c["lastActivity"], reverse=True)
+        # Searches come back by relevance (here: alphabetically), lists by recency.
+        items.sort(key=lambda c: c["title"]) if words else items.sort(key=lambda c: c["lastActivity"], reverse=True)
         return web.json_response({"items": items, "hasMore": False})
 
     @routes.get("/v1/chats/{id}")

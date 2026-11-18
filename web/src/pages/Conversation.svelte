@@ -7,6 +7,7 @@
   } from '../lib/api'
   import { duration, when } from '../lib/time'
   import WhenPicker from '../lib/WhenPicker.svelte'
+  import { richText } from '../lib/richtext'
   import type { Picker } from '../lib/Picker'
 
   let { id }: { id: string } = $props()
@@ -176,7 +177,7 @@
           <a href={assetURL(a)} target="_blank" rel="noopener"><Icon name="file" size={16} /> {a.fileName ?? 'File'}</a>
         {/if}
       {/each}
-      {#if m.isDeleted}<p class="muted"><em>Deleted message</em></p>{:else if m.text}<p class="text">{m.text}</p>{/if}
+      {#if m.isDeleted}<p class="muted"><em>Deleted message</em></p>{:else if m.text}<p class="text" use:richText={m.text}></p>{/if}
       <time>{when(m.timestamp)}</time>
     </li>
   {/each}

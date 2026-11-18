@@ -10,13 +10,14 @@
   let input: HTMLInputElement
   let timer: ReturnType<typeof setTimeout>
   let latest = 0
-  const shown = $derived(open && !!query.trim())
+  const MIN = 2 // letters before searching
+  const shown = $derived(open && query.trim().length >= MIN)
 
   function search() {
     clearTimeout(timer)
     const q = query.trim()
-    pending = !!q
-    if (!q) return (results = [])
+    pending = q.length >= MIN
+    if (!pending) return (results = [])
     timer = setTimeout(async () => {
       const mine = ++latest
       try {
@@ -24,7 +25,9 @@
         if (mine !== latest) return // a newer search is on its way
         const words = q.toLowerCase().split(/\s+/)
         // Beeper's "titles" scope also matches network names: keep chats whose name has every word.
-        results = page.items.filter((c) => !c.mergedIntoChatID && words.every((w) => c.title.toLowerCase().includes(w)))
+        results = page.items
+          .filter((c) => !c.mergedIntoChatID && words.every((w) => c.title.toLowerCase().includes(w)))
+          .sort((a, b) => (Date.parse(b.lastActivity ?? '') || 0) - (Date.parse(a.lastActivity ?? '') || 0))
         active = 0
         error = ''
       } catch (e) {
