@@ -3,6 +3,11 @@ import urllib.parse
 import aiohttp
 
 
+def describe(e):
+    # Never repr() aiohttp errors: it includes the request headers, so the Beeper token.
+    return f"{type(e).__name__}: {e}"
+
+
 class Beeper:
     """Minimal client for the Beeper Client API served by Beeper Server/Desktop."""
 

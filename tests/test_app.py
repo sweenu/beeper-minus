@@ -1,6 +1,8 @@
 """End-to-end check against the fake Beeper: python -m tests.test_app (or pytest)."""
 
 import asyncio
+import io
+import logging
 import os
 import stat
 import tempfile
@@ -226,7 +228,15 @@ async def setup_flow(static):
 
 
 def test_end_to_end():
-    asyncio.run(main())
+    # Failures get logged along the way: none of them may carry the token.
+    logs = io.StringIO()
+    handler = logging.StreamHandler(logs)
+    logging.getLogger().addHandler(handler)
+    try:
+        asyncio.run(main())
+    finally:
+        logging.getLogger().removeHandler(handler)
+    assert "send " in logs.getvalue() and fake_beeper.TOKEN not in logs.getvalue(), "the Beeper token leaked into the logs"
 
 
 if __name__ == "__main__":

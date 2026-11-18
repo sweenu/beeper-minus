@@ -27,8 +27,8 @@ All configuration lives in a TOML file: see [`config.example.toml`](config.examp
 for a headless "transcribe into Note to self" setup.
 
 > [!WARNING]
-> The web app has no authentication and can read and send your messages. It listens on localhost by default;
-> expose it only behind an authenticating reverse proxy (or a private network like Tailscale).
+> The web app can read and send your messages, and has no password. It listens on localhost by default;
+> read [SECURITY.md](SECURITY.md) before exposing it.
 > It only answers requests for `localhost`, `web.host` and the names in `web.allowed_hosts`: list the
 > name you open it with (your proxy's domain, your Tailscale name). Changes are only accepted from the
 > app's own page, so other websites you visit can't send messages through it.

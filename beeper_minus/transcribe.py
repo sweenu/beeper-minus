@@ -8,6 +8,7 @@ from pathlib import Path
 
 import aiohttp
 
+from .beeper import describe
 from .db import get_kv, now_ms, rows, set_kv
 
 log = logging.getLogger(__name__)
@@ -218,7 +219,7 @@ class Transcriber:
                     continue
                 await self.transcribe(msg, chat)
             except Exception as e:
-                log.warning("failed %s/%s: %r", msg.get("chatID"), msg.get("id"), e)
+                log.warning("failed %s/%s: %s", msg.get("chatID"), msg.get("id"), describe(e))
                 try:
                     self.mark_retry(msg)
                 except (KeyError, ValueError):
@@ -250,7 +251,7 @@ class Transcriber:
             try:
                 await self.listen()
             except (OSError, aiohttp.ClientError, asyncio.TimeoutError) as e:
-                log.warning("websocket: %r, reconnecting", e)
+                log.warning("websocket: %s, reconnecting", describe(e))
             except Exception:
                 # A malformed event or page must not take the scheduler and web app down with it.
                 log.exception("websocket")

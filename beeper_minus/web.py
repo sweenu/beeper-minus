@@ -5,6 +5,7 @@ from pathlib import Path
 from aiohttp import web
 from yarl import URL
 
+from .beeper import describe
 from .db import now_ms, rows
 
 log = logging.getLogger(__name__)
@@ -208,9 +209,9 @@ async def errors(request, handler):
         raise
     except Exception as e:
         # Surface Beeper/engine failures to the web app instead of a bare 500.
-        log.warning("%s %s: %r", request.method, request.path, e)
+        log.warning("%s %s: %s", request.method, request.path, describe(e))
         status = getattr(e, "status", 502)
-        raise web.HTTPBadGateway(text=f"{status}: {getattr(e, 'message', None) or e!r}")
+        raise web.HTTPBadGateway(text=f"{status}: {getattr(e, 'message', None) or describe(e)}")
 
 
 async def serve(app, host, port):
