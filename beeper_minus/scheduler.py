@@ -9,8 +9,8 @@ log = logging.getLogger(__name__)
 
 
 def permanent(e):
-    # A 4xx won't fix itself by retrying; anything else (Beeper down, 5xx) is retried next tick.
-    return isinstance(e, aiohttp.ClientResponseError) and e.status < 500
+    # A 4xx won't fix itself by retrying; anything else (Beeper down, 5xx, signed out, rate limited) is retried next tick.
+    return isinstance(e, aiohttp.ClientResponseError) and e.status < 500 and e.status not in (401, 403, 408, 429)
 
 
 async def tick(beeper, db):

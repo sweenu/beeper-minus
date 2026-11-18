@@ -69,6 +69,11 @@ async def main():
             assert r.status == 200
         assert chats[bob]["isArchived"]
         assert rows(db, "select chat_title from snoozes") == [{"chat_title": "Bob Martin"}]
+        # Signed out (401): kept for the next tick, not dropped.
+        signed_out = Beeper("http://127.0.0.1:23399", "revoked")
+        await scheduler.tick(signed_out, db)
+        await signed_out.close()
+        assert chats[bob]["isArchived"] and rows(db, "select chat_id from snoozes") == [{"chat_id": bob}]
         await scheduler.tick(beeper, db)
         assert not chats[bob]["isArchived"] and not rows(db, "select * from snoozes")
 
