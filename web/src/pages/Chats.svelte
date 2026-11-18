@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Icon from '../lib/Icon.svelte'
   import { onMount } from 'svelte'
   import { api, beeper, chatPath, schedule, snooze, type Chat, type Page, type Snooze } from '../lib/api'
   import { when } from '../lib/time'
@@ -86,12 +87,12 @@
             {#if c.unreadCount}<span class="badge">{c.unreadCount}</span>{/if}
           </span>
           <span class="meta">
-            {c.network}{#if snoozes[c.id]} · 💤 until {when(snoozes[c.id])}{/if}
+            {c.network}{#if snoozes[c.id]} · <Icon name="snooze" size={13} /> until {when(snoozes[c.id])}{/if}
           </span>
         </span>
       </a>
-      <button class="icon" title="Send later" aria-label={`Send later to ${c.title}`} onclick={() => openSchedule(c)}>🕒</button>
-      <button class="icon" title="Snooze" aria-label={`Snooze ${c.title}`} onclick={() => openSnooze(c)}>💤</button>
+      <button class="icon" title="Send later" aria-label={`Send later to ${c.title}`} onclick={() => openSchedule(c)}><Icon name="later" /></button>
+      <button class="icon" title="Snooze" aria-label={`Snooze ${c.title}`} onclick={() => openSnooze(c)}><Icon name="snooze" /></button>
     </li>
   {:else}
     {#if !loading && !error}<li class="empty">No chats.</li>{/if}

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Icon from '../lib/Icon.svelte'
   import { onMount } from 'svelte'
   import { api, chatPath, unsnooze, type Snooze } from '../lib/api'
   import { when } from '../lib/time'
@@ -27,7 +28,7 @@
         <span class="avatar" aria-hidden="true">{[...(s.chat_title ?? '?')][0]}</span>
         <span class="body">
           <strong class="title">{s.chat_title}</strong>
-          <span class="meta">{s.network} · 💤 until {when(s.until)}</span>
+          <span class="meta">{s.network} · <Icon name="snooze" size={13} /> until {when(s.until)}</span>
         </span>
       </a>
       <button onclick={() => wake(s)}>Unsnooze</button>

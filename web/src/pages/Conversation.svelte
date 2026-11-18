@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Icon from '../lib/Icon.svelte'
   import { onMount, tick } from 'svelte'
   import {
     api, assetURL, beeper, config, schedule, snooze, transcribe, unschedule,
@@ -134,12 +135,12 @@
 </script>
 
 <header class="bar">
-  <a href={chat?.isArchived ? '#/archived' : '#/'} class="icon" aria-label="Back">←</a>
+  <a href={chat?.isArchived ? '#/archived' : '#/'} class="icon" aria-label="Back"><Icon name="back" /></a>
   <div class="ellipsis">
     <strong>{chat?.title ?? '…'}</strong>
     {#if chat}<div class="meta">{chat.network}{chat.isArchived ? ' · archived' : ''}</div>{/if}
   </div>
-  <button class="icon" title="Snooze" aria-label="Snooze this chat" onclick={openSnooze}>💤</button>
+  <button class="icon" title="Snooze" aria-label="Snooze this chat" onclick={openSnooze}><Icon name="snooze" /></button>
 </header>
 
 {#if notice}<p class="notice" role="status">{notice} <a href="#/">Back to inbox</a></p>{/if}
@@ -172,7 +173,7 @@
           <!-- svelte-ignore a11y_media_has_caption -->
           <video controls preload="none" src={assetURL(a)}></video>
         {:else}
-          <a href={assetURL(a)} target="_blank" rel="noopener">📎 {a.fileName ?? 'File'}</a>
+          <a href={assetURL(a)} target="_blank" rel="noopener"><Icon name="file" size={16} /> {a.fileName ?? 'File'}</a>
         {/if}
       {/each}
       {#if m.isDeleted}<p class="muted"><em>Deleted message</em></p>{:else if m.text}<p class="text">{m.text}</p>{/if}
@@ -184,7 +185,7 @@
 {#each scheduled as s (s.id)}
   <div class="msg mine scheduled">
     <p class="text">{s.text}</p>
-    <time>🕒 {when(s.send_at)}</time>
+    <time><Icon name="later" size={13} /> {when(s.send_at)}</time>
     {#if s.error}<p class="error">Failed: {s.error}</p>{/if}
     <button class="link" onclick={() => cancel(s)}>Unschedule</button>
   </div>
@@ -198,8 +199,8 @@
     aria-label="Message"
     onkeydown={(e) => e.key === 'Enter' && !e.shiftKey && !matchMedia('(pointer: coarse)').matches && (e.preventDefault(), e.currentTarget.form?.requestSubmit())}
   ></textarea>
-  <button type="button" class="icon" title="Send later" aria-label="Send later" onclick={later}>🕒</button>
-  <button class="primary" disabled={sending || !draft.trim()}>Send</button>
+  <button type="button" class="icon" title="Send later" aria-label="Send later" onclick={later}><Icon name="later" /></button>
+  <button class="primary send" aria-label="Send" title="Send" disabled={sending || !draft.trim()}><Icon name="send" /></button>
 </form>
 
 {#if picker}<WhenPicker {...picker} onclose={() => (picker = null)} />{/if}

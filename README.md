@@ -71,11 +71,31 @@ for a headless "transcribe into Note to self" setup.
 
 Both run as the `beeper` user.
 
-### Getting a token
+### First-time Beeper Server setup
 
-Beeper Server can't approve OAuth requests (no UI). Register a read+write `bdapi_` token by hand: put its
-sha256 in `index.db` `key_values['conn:tokens']` with the server stopped. With Beeper Desktop, enable its
-Desktop API and create a token from its settings.
+You don't need OAuth. Beeper Server can't approve OAuth requests (approval is a button in Beeper Desktop's
+UI), but it accepts the Beeper account access token that its own sign-in flow returns as a read+write API
+token. The sign-in endpoints work without a token:
+
+```sh
+api=http://127.0.0.1:23373
+curl -X POST $api/v1/app/setup/start                      # -> setupRequestID
+curl -X POST $api/v1/app/setup/email -H 'Content-Type: application/json' \
+  -d '{"setupRequestID": "…", "email": "you@example.com"}'
+curl -X POST $api/v1/app/setup/response -H 'Content-Type: application/json' \
+  -d '{"setupRequestID": "…", "response": "<code from the email>"}'
+```
+
+The last response contains `matrix.accessToken`, **returned only once**: save it as `beeper.token_file`.
+Then let this device decrypt your messages, for example with your recovery key:
+
+```sh
+curl -H "Authorization: Bearer $token" $api/v1/app/setup          # state: needs-verification, …, ready
+curl -X POST $api/v1/app/setup/verification/recovery-key -H "Authorization: Bearer $token" \
+  -H 'Content-Type: application/json' -d '{"recoveryKey": "…"}'
+```
+
+With Beeper Desktop instead, create a token from its Desktop API settings.
 
 ## Development
 

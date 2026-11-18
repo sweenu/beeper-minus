@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Icon from '../lib/Icon.svelte'
   import { onMount } from 'svelte'
   import { api, chatPath, editScheduled, unschedule, type Scheduled } from '../lib/api'
   import { when } from '../lib/time'
@@ -42,7 +43,7 @@
     <li class="card">
       <div class="line">
         <a href={`#${chatPath(s.chat_id)}`}><strong>{s.chat_title}</strong></a>
-        <time>🕒 {when(s.send_at)}</time>
+        <time><Icon name="later" size={13} /> {when(s.send_at)}</time>
       </div>
       <p class="text">{s.text}</p>
       {#if s.error}<p class="error">Failed: {s.error}. Edit it to retry.</p>{/if}

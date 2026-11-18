@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Icon from '../lib/Icon.svelte'
   import { onMount } from 'svelte'
   import { api, chatPath, type Transcription } from '../lib/api'
   import { duration, when } from '../lib/time'
@@ -19,7 +20,7 @@
         <time>{when(t.sent_at)}</time>
       </div>
       <p class="text">{t.text || '(silence)'}</p>
-      <span class="meta">{t.network} · 🎤 {duration(t.duration)} · {t.language}</span>
+      <span class="meta">{t.network} · <Icon name="mic" size={13} /> {duration(t.duration)} · {t.language}</span>
     </li>
   {:else}
     {#if items}<li class="empty">No transcripts yet.</li>{/if}

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Icon, { type IconName } from './lib/Icon.svelte'
   import Chats from './pages/Chats.svelte'
   import Conversation from './pages/Conversation.svelte'
   import Snoozed from './pages/Snoozed.svelte'
@@ -7,12 +8,12 @@
 
   let hash = $state(location.hash || '#/')
   const parts = $derived(hash.slice(2).split('/'))
-  const tabs = [
-    ['#/', '💬', 'Inbox'],
-    ['#/archived', '🗄️', 'Archived'],
-    ['#/snoozed', '💤', 'Snoozed'],
-    ['#/scheduled', '🕒', 'Scheduled'],
-    ['#/transcriptions', '🎙️', 'Transcripts'],
+  const tabs: [string, IconName, string][] = [
+    ['#/', 'inbox', 'Inbox'],
+    ['#/archived', 'archive', 'Archived'],
+    ['#/snoozed', 'snooze', 'Snoozed'],
+    ['#/scheduled', 'later', 'Scheduled'],
+    ['#/transcriptions', 'mic', 'Transcripts'],
   ]
 </script>
 
@@ -21,7 +22,7 @@
 {#if parts[0] !== 'chats'}
   <nav>
     {#each tabs as [href, icon, label] (href)}
-      <a {href} aria-current={hash === href ? 'page' : undefined}><span aria-hidden="true">{icon}</span>{label}</a>
+      <a {href} aria-current={hash === href ? 'page' : undefined}><Icon name={icon} size={22} />{label}</a>
     {/each}
   </nav>
 {/if}
