@@ -65,7 +65,7 @@ python3Packages.buildPythonApplication {
   passthru = { inherit web; };
 
   meta = {
-    description = "Self-hosted voice note transcription, snooze and send later for Beeper";
+    description = "Self-hosted voice note transcription and send later for Beeper";
     homepage = "https://github.com/sweenu/beeper-minus";
     license = lib.licenses.mit;
     mainProgram = "beeper-minus";

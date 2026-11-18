@@ -1,5 +1,5 @@
 {
-  description = "Beeper Minus: self-hosted voice note transcription, snooze and send later for Beeper";
+  description = "Beeper Minus: self-hosted voice note transcription and send later for Beeper";
 
   inputs.nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
 

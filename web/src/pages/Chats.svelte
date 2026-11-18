@@ -1,7 +1,7 @@
 <script lang="ts">
   import Icon from '../lib/Icon.svelte'
   import { onMount } from 'svelte'
-  import { api, beeper, chatPath, schedule, snooze, WORKING, type Account, type Chat, type Page, type Snooze } from '../lib/api'
+  import { beeper, chatPath, schedule, WORKING, type Account, type Chat, type Page } from '../lib/api'
   import { when } from '../lib/time'
   import { previewText } from '../lib/preview'
   import WhenPicker from '../lib/WhenPicker.svelte'
@@ -10,7 +10,6 @@
   let { archived = false }: { archived?: boolean } = $props()
 
   let chats = $state<Chat[]>([])
-  let snoozes = $state<Record<string, number>>({})
   let cursor = $state<string | undefined>()
   let hasMore = $state(false)
   let loading = $state(true)
@@ -43,20 +42,7 @@
   onMount(() => {
     load()
     beeper<Account[]>('/accounts').then((a) => (broken = a.filter((x) => !WORKING.includes(x.status))), () => {})
-    api<Snooze[]>('/api/snoozes').then((s) => (snoozes = Object.fromEntries(s.map((x) => [x.chat_id, x.until]))), () => {})
   })
-
-  const openSnooze = (c: Chat) =>
-    (picker = {
-      title: `Snooze ${c.title}`,
-      action: 'Snooze',
-      onsubmit: async (at) => {
-        await snooze(c.id, at)
-        if (archived) snoozes = { ...snoozes, [c.id]: at }
-        else chats = chats.filter((x) => x.id !== c.id)
-        notice = `${c.title} snoozed until ${when(at)}.`
-      },
-    })
 
   const openSchedule = (c: Chat) =>
     (picker = {
@@ -97,12 +83,11 @@
             {#if c.unreadCount}<span class="badge">{c.unreadCount}</span>{/if}
           </span>
           <span class="meta">
-            {c.network}{#if snoozes[c.id]} · <Icon name="snooze" size={13} /> until {when(snoozes[c.id])}{/if}
+            {c.network}
           </span>
         </span>
       </a>
       <button class="icon" title="Send later" aria-label={`Send later to ${c.title}`} onclick={() => openSchedule(c)}><Icon name="later" /></button>
-      <button class="icon" title="Snooze" aria-label={`Snooze ${c.title}`} onclick={() => openSnooze(c)}><Icon name="snooze" /></button>
     </li>
   {:else}
     {#if !loading && !error}<li class="empty">No chats.</li>{/if}

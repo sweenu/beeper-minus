@@ -2,7 +2,6 @@
   import Icon, { type IconName } from './lib/Icon.svelte'
   import Chats from './pages/Chats.svelte'
   import Conversation from './pages/Conversation.svelte'
-  import Snoozed from './pages/Snoozed.svelte'
   import ScheduledPage from './pages/Scheduled.svelte'
   import Transcriptions from './pages/Transcriptions.svelte'
   import Setup from './pages/Setup.svelte'
@@ -22,7 +21,6 @@
   const tabs: [string, IconName, string][] = [
     ['#/', 'inbox', 'Inbox'],
     ['#/archived', 'archive', 'Archived'],
-    ['#/snoozed', 'snooze', 'Snoozed'],
     ['#/scheduled', 'later', 'Scheduled'],
     ['#/transcriptions', 'mic', 'Transcripts'],
   ]
@@ -64,8 +62,6 @@
       <Conversation id={decodeURIComponent(parts[1])} />
     {:else if parts[0] === 'archived'}
       <Chats archived />
-    {:else if parts[0] === 'snoozed'}
-      <Snoozed />
     {:else if parts[0] === 'scheduled'}
       <ScheduledPage />
     {:else if parts[0] === 'accounts'}

@@ -39,7 +39,7 @@ in
   };
 
   options.services.beeper-minus = {
-    enable = mkEnableOption "Beeper Minus: voice note transcription, snooze and send later for Beeper";
+    enable = mkEnableOption "Beeper Minus: voice note transcription and send later for Beeper";
     package = mkPackageOption pkgs "beeper-minus" { };
     whisperPackage = mkPackageOption pkgs "whisper-cpp" {
       example = "whisper-cpp-vulkan";

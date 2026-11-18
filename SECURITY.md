@@ -105,7 +105,7 @@ Pitfalls:
   your Beeper devices like any other chat.
 - **Transcripts stay in the database** until you delete them. Beeper Minus has no expiry.
 
-## Snooze and send later
+## Send later
 
 - **Scheduled messages are sent even if they're late.** If Beeper Minus or Beeper Server was down at
   the chosen time, the message goes out as soon as both are back. Check the Scheduled page after an
@@ -113,8 +113,6 @@ Pitfalls:
 - **Rejected messages are kept, not lost.** When Beeper refuses one for good (a deleted chat...), it
   stays on the Scheduled page with the error, and editing it retries. Sign-in, permission and
   rate-limit errors are retried automatically.
-- **A snoozed chat comes back when its time is up**, not sooner. Beeper's own clients may unarchive it
-  earlier when a new message arrives.
 
 ## Keeping up to date
 

@@ -240,8 +240,7 @@ class Transcriber:
                 if not self.wanted(msg):
                     continue
                 chat = await self.beeper.chat(msg["chatID"])
-                # Archived chats are ignored, unless they're only snoozed.
-                if chat.get("isArchived") and not rows(self.db, "select 1 from snoozes where chat_id = ?", msg["chatID"]):
+                if chat.get("isArchived"):
                     continue
                 await self.transcribe(msg, chat)
             except Exception as e:

@@ -83,28 +83,6 @@ def make_app(beeper, db, transcriber, static_dir, save_token, hosts=("localhost"
         chat = await beeper.chat(chat_id)
         return chat.get("title"), chat.get("network")
 
-    # --- snooze ---
-
-    @routes.get("/api/snoozes")
-    async def list_snoozes(request):
-        return web.json_response(rows(db, "select * from snoozes order by until"))
-
-    @routes.post("/api/snoozes")
-    async def snooze(request):
-        data = await body(request, "chatID", "until")
-        chat_id, until = field(data, "chatID", str), field(data, "until", int)
-        title, network = await chat_info(chat_id)
-        await beeper.archive(chat_id, True)
-        db.execute("insert or replace into snoozes values (?, ?, ?, ?, ?)", (chat_id, title, network, until, now_ms()))
-        return web.json_response({"ok": True})
-
-    @routes.delete("/api/snoozes/{chat_id}")
-    async def unsnooze(request):
-        chat_id = request.match_info["chat_id"]
-        await beeper.archive(chat_id, False)
-        db.execute("delete from snoozes where chat_id = ?", (chat_id,))
-        return web.json_response({"ok": True})
-
     # --- send later ---
 
     @routes.get("/api/scheduled")

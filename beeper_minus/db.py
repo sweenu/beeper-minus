@@ -12,9 +12,6 @@ create table if not exists transcriptions (
 );
 create index if not exists transcriptions_alias on transcriptions (alias);
 create index if not exists transcriptions_created on transcriptions (created_at);
-create table if not exists snoozes (
-  chat_id text primary key, chat_title text, network text, until integer not null, created_at integer
-);
 create table if not exists scheduled (
   id integer primary key, chat_id text not null, chat_title text, network text,
   text text not null, send_at integer not null, error text, created_at integer

@@ -1,23 +1,22 @@
 # Beeper Minus
 
-A small, self-hosted sidecar for [Beeper](https://www.beeper.com) that brings three Beeper Plus features to
-your own server:
+A small, self-hosted sidecar for [Beeper](https://www.beeper.com) that brings two Beeper Plus features to your
+own server:
 
 - **Voice note transcription**: local [whisper.cpp](https://github.com/ggml-org/whisper.cpp) or any
   OpenAI-compatible speech-to-text API. Automatic or on demand, shown under the audio in the web app and
   optionally posted to your *Note to self*.
-- **Snooze**: archives a chat and unarchives it at the time you pick.
 - **Send later**: schedule a message from the chat list or from inside a conversation; edit or unschedule it.
 
 It talks to the Beeper Client API served by **Beeper Server** (headless) or Beeper Desktop. It is not a
-Beeper client replacement: the web app only shows your chats and these three features.
+Beeper client replacement: the web app only shows your chats and these two features.
 
 ## How it works
 
 One Python process (aiohttp):
 
 - listens to Beeper's WebSocket for new voice notes (automatic transcription),
-- runs a 15-second scheduler for snoozes and scheduled messages (state in SQLite),
+- runs a 15-second scheduler for scheduled messages (state in SQLite),
 - optionally serves the web app (Svelte + TypeScript, phone friendly, with a setup screen that signs Beeper
   Server in) and a small API. The browser never
   sees the Beeper token: the backend proxies a whitelist of Beeper endpoints (`/v1/accounts`, `/v1/chats`,

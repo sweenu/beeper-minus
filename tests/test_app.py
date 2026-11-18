@@ -61,11 +61,11 @@ async def main():
                 assert r.status == 403, (bad, r.status)
         async with http.get(f"{api}/", headers={"If-Modified-Since": "Thu, 01 Jan 1970 00:00:01 GMT"}) as r:
             assert r.status == 200 and "hi" in await r.text() and r.headers["Cache-Control"] == "no-store", r.headers
-        async with http.get(f"{api}/api/snoozes", headers={"Host": "evil.example"}) as r:
+        async with http.get(f"{api}/api/scheduled", headers={"Host": "evil.example"}) as r:
             assert r.status == 403, r.status  # DNS rebinding
         # Other websites can make the browser send requests, but not change anything.
         for headers in ({"Origin": "https://evil.example"}, {"Sec-Fetch-Site": "cross-site"}):
-            async with http.post(f"{api}/api/snoozes", json={"chatID": bob, "until": 1}, headers=headers) as r:
+            async with http.post(f"{api}/api/scheduled", json={"chatID": bob, "text": "x", "sendAt": 1}, headers=headers) as r:
                 assert r.status == 403, (headers, r.status)
         async with http.delete(f"{api}/api/scheduled/1", headers={"Origin": "http://127.0.0.1:23398", "Sec-Fetch-Site": "same-origin"}) as r:
             assert r.status == 200, r.status
@@ -98,19 +98,6 @@ async def main():
         async with http.get(f"{api}/api/beeper/v1/accounts") as r:
             assert {"accountID": "local-whatsapp_me", "status": "connected"}.items() <= next(a for a in await r.json() if a["network"] == "WhatsApp").items()
 
-        # Snooze archives now and unarchives once due.
-        async with http.post(f"{api}/api/snoozes", json={"chatID": bob, "until": 1}) as r:
-            assert r.status == 200
-        assert chats[bob]["isArchived"]
-        assert rows(db, "select chat_title from snoozes") == [{"chat_title": "Bob Martin"}]
-        # Signed out (401): kept for the next tick, not dropped.
-        signed_out = Beeper("http://127.0.0.1:23399", "revoked")
-        await scheduler.tick(signed_out, db)
-        await signed_out.close()
-        assert chats[bob]["isArchived"] and rows(db, "select chat_id from snoozes") == [{"chat_id": bob}]
-        await scheduler.tick(beeper, db)
-        assert not chats[bob]["isArchived"] and not rows(db, "select * from snoozes")
-
         # Send later: nothing before it's due, sent once due, kept with an error on a 4xx.
         async with http.post(f"{api}/api/scheduled", json={"chatID": alice, "text": "later!", "sendAt": 2**42}) as r:
             sid = (await r.json())["id"]
@@ -120,6 +107,11 @@ async def main():
         assert messages[alice][-1]["text"] != "later!"
         async with http.patch(f"{api}/api/scheduled/{sid}", json={"sendAt": 1, "text": "now!"}) as r:
             assert (await r.json())["text"] == "now!"
+        # Signed out (401): kept for the next tick, without an error.
+        signed_out = Beeper("http://127.0.0.1:23399", "revoked")
+        await scheduler.tick(signed_out, db)
+        await signed_out.close()
+        assert rows(db, "select text, error from scheduled") == [{"text": "now!", "error": None}]
         await scheduler.tick(beeper, db)
         assert messages[alice][-1]["text"] == "now!" and not rows(db, "select * from scheduled")
         async with http.post(f"{api}/api/scheduled", json={"chatID": alice, "text": "x", "sendAt": 1}) as r:
@@ -207,7 +199,7 @@ async def tailscale_users(static):
     await web.TCPSite(runner, "127.0.0.1", 23395).start()
     async with ClientSession() as http:
         for login, status in ((None, 403), ("someone@github", 403), ("Me@GitHub", 200)):
-            async with http.get("http://127.0.0.1:23395/api/snoozes", headers={"Tailscale-User-Login": login} if login else {}) as r:
+            async with http.get("http://127.0.0.1:23395/api/scheduled", headers={"Tailscale-User-Login": login} if login else {}) as r:
                 assert r.status == status, (login, r.status)
     await runner.cleanup()
 

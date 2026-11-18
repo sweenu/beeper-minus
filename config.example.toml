@@ -25,7 +25,7 @@ port = 8099
 # refused, and keep `host` on localhost so nobody can send the header themselves.
 # allowed_users = ["you@github"]
 
-# Snooze and send later need no configuration.
+# Send later needs no configuration.
 
 [transcription]
 # "whisper-cpp" (local) or "openai" (any OpenAI-compatible speech-to-text API).

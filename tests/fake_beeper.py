@@ -298,11 +298,6 @@ def make_app(state="ready"):
     async def get_chat(request):
         return web.json_response(find(request.match_info["id"]))
 
-    @routes.post("/v1/chats/{id}/archive")
-    async def archive(request):
-        find(request.match_info["id"])["isArchived"] = (await request.json())["archived"]
-        return web.Response(status=200)
-
     @routes.get("/v1/chats/{id}/messages")
     async def list_messages(request):
         find(request.match_info["id"])

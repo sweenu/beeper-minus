@@ -1,7 +1,7 @@
 [project]
 name = "beeper-minus"
 version = "0.1.0"
-description = "Self-hosted voice note transcription, snooze and send later for Beeper"
+description = "Self-hosted voice note transcription and send later for Beeper"
 requires-python = ">=3.11"
 dependencies = ["aiohttp"]
 

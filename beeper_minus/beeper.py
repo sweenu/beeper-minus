@@ -35,9 +35,6 @@ class Beeper:
     async def chat(self, chat_id):
         return await self.call("GET", f"/v1/chats/{chat_id}")
 
-    async def archive(self, chat_id, archived):
-        await self.call("POST", f"/v1/chats/{chat_id}/archive", {"archived": archived})
-
     async def send(self, chat_id, text):
         return await self.call("POST", f"/v1/chats/{chat_id}/messages", {"text": text})
 

@@ -85,7 +85,6 @@ export interface LoginSession {
 export const WORKING = ['connected', 'connecting', 'backfilling']
 
 // Beeper Minus' own records.
-export interface Snooze { chat_id: string; chat_title: string; network: string; until: number }
 export interface Scheduled { id: number; chat_id: string; chat_title: string; network: string; text: string; send_at: number; error: string | null }
 export interface Transcription {
   chat_id: string; message_id: string; chat_title: string; network: string; sender: string
@@ -117,8 +116,6 @@ export const beeper = <T>(path: string, query: Record<string, string | number | 
 export const chatPath = (id: string) => `/chats/${encodeURIComponent(id)}`
 export const assetURL = (a: Attachment) => `/api/beeper/v1/assets/serve?url=${encodeURIComponent(a.id ?? a.srcURL ?? '')}`
 
-export const snooze = (chatID: string, until: number) => api('/api/snoozes', { method: 'POST', body: { chatID, until } })
-export const unsnooze = (chatID: string) => api(`/api/snoozes/${encodeURIComponent(chatID)}`, { method: 'DELETE' })
 export const schedule = (chatID: string, text: string, sendAt: number) =>
   api<Scheduled>('/api/scheduled', { method: 'POST', body: { chatID, text, sendAt } })
 export const editScheduled = (id: number, text: string, sendAt: number) =>

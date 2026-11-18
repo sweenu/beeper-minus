@@ -2,7 +2,7 @@
   import Icon from '../lib/Icon.svelte'
   import { onMount, tick } from 'svelte'
   import {
-    api, assetURL, beeper, config, schedule, snooze, transcribe, unschedule,
+    api, assetURL, beeper, config, schedule, transcribe, unschedule,
     type Chat, type Message, type Page, type Scheduled, type Transcription,
   } from '../lib/api'
   import { duration, when } from '../lib/time'
@@ -23,7 +23,6 @@
   let draft = $state('')
   let sending = $state(false)
   let error = $state('')
-  let notice = $state('')
   let picker = $state<Picker | null>(null)
 
   const enc = encodeURIComponent
@@ -119,16 +118,6 @@
       },
     })
 
-  const openSnooze = () =>
-    (picker = {
-      title: `Snooze ${chat?.title ?? ''}`,
-      action: 'Snooze',
-      onsubmit: async (at) => {
-        await snooze(id, at)
-        notice = `Snoozed until ${when(at)}.`
-      },
-    })
-
   async function cancel(s: Scheduled) {
     await unschedule(s.id)
     scheduled = scheduled.filter((x) => x.id !== s.id)
@@ -141,10 +130,8 @@
     <strong>{chat?.title ?? '…'}</strong>
     {#if chat}<div class="meta">{chat.network}{chat.isArchived ? ' · archived' : ''}</div>{/if}
   </div>
-  <button class="icon" title="Snooze" aria-label="Snooze this chat" onclick={openSnooze}><Icon name="snooze" /></button>
 </header>
 
-{#if notice}<p class="notice" role="status">{notice} <a href="#/">Back to inbox</a></p>{/if}
 {#if error}<p class="error" role="alert">{error}</p>{/if}
 {#if hasMore}<button class="more" onclick={() => older().catch((e) => (error = e.message))}>Load older messages</button>{/if}
 

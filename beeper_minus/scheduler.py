@@ -16,15 +16,6 @@ def permanent(e):
 
 async def tick(beeper, db):
     now = now_ms()
-    for s in rows(db, "select * from snoozes where until <= ?", now):
-        try:
-            await beeper.archive(s["chat_id"], False)
-        except Exception as e:
-            log.warning("unsnooze %s: %s", s["chat_id"], describe(e))
-            if not permanent(e):
-                continue
-        db.execute("delete from snoozes where chat_id = ?", (s["chat_id"],))
-        log.info("unsnoozed %s", s["chat_id"])
     for m in rows(db, "select * from scheduled where send_at <= ? and error is null order by send_at", now):
         try:
             await beeper.send(m["chat_id"], m["text"])
