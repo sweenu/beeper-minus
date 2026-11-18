@@ -38,4 +38,5 @@ test('links: only http(s) and mailto, opened safely', () => {
 test('plain text stays text', () => {
   assert.equal(render('Is 3 < 5? <3 <notatag>'), 'Is 3 &lt; 5? &lt;3 &lt;notatag&gt;')
   assert.equal(plain('<em>hi</em> &amp; bye'), 'hi & bye')
+  assert.equal(plain('<b>shown</b><script>alert(1)</script><style>p{}</style>'), 'shown')
 })

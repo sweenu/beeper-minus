@@ -45,5 +45,10 @@ export function richText(node: HTMLElement, text: string) {
   return { update: render }
 }
 
-/** The text alone, for previews. */
-export const plain = (t: string) => (LOOKS_HTML.test(t) ? (parse(t).textContent ?? '') : t)
+/** The text alone, for previews: what the message shows, without its formatting. */
+export function plain(t: string) {
+  if (!LOOKS_HTML.test(t)) return t
+  const shown = document.createElement('div')
+  rebuild(parse(t), shown)
+  return shown.textContent ?? ''
+}
