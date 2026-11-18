@@ -29,6 +29,8 @@ for a headless "transcribe into Note to self" setup.
 > [!WARNING]
 > The web app has no authentication and can read and send your messages. It listens on localhost by default;
 > expose it only behind an authenticating reverse proxy (or a private network like Tailscale).
+> It only answers requests for `localhost`, `web.host` and the names in `web.allowed_hosts`: list the
+> name you open it with (your proxy's domain, your Tailscale name).
 
 ## NixOS
 

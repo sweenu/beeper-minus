@@ -44,8 +44,10 @@ async def run(cfg):
         tasks.append(after_sign_in(transcriber.run()))
     if w.get("enable", True):
         static = os.environ.get("BEEPER_MINUS_STATIC") or w.get("static_dir") or Path(__file__).parent.parent / "web" / "dist"
-        app = web.make_app(beeper, db, transcriber, static, save_token)
-        await web.serve(app, w.get("host", "127.0.0.1"), w.get("port", 8099))
+        host = w.get("host", "127.0.0.1")
+        hosts = {h.lower() for h in ("localhost", "127.0.0.1", "::1", host, *w.get("allowed_hosts", []))}
+        app = web.make_app(beeper, db, transcriber, static, save_token, hosts)
+        await web.serve(app, host, w.get("port", 8099))
     await asyncio.gather(*tasks)
 
 

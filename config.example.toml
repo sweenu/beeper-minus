@@ -17,6 +17,9 @@ enable = true
 # No authentication is built in: keep it on localhost, or put an authenticating reverse proxy in front.
 host = "127.0.0.1"
 port = 8099
+# Names you open the web app with, besides localhost and `host`: a reverse proxy's domain, a Tailscale name...
+# Requests for any other Host are refused, so another website can't reach the app through DNS rebinding.
+# allowed_hosts = ["beeper.example.com"]
 
 # Snooze and send later need no configuration.
 

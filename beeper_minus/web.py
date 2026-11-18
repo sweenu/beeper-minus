@@ -17,7 +17,7 @@ PASS_REQ = ("Content-Type", "Range", "Accept-Encoding", "If-None-Match", "If-Mod
 PASS_RESP = ("Content-Type", "Content-Length", "Content-Encoding", "Content-Range", "Accept-Ranges", "ETag", "Last-Modified", "Cache-Control")
 
 
-def make_app(beeper, db, transcriber, static_dir, save_token):
+def make_app(beeper, db, transcriber, static_dir, save_token, hosts=("localhost", "127.0.0.1", "::1")):
     routes = web.RouteTableDef()
 
     async def body(request, *required):
@@ -169,7 +169,14 @@ def make_app(beeper, db, transcriber, static_dir, save_token):
     async def home(request):
         return web.FileResponse(index)
 
-    app = web.Application(middlewares=[errors])
+    @web.middleware
+    async def known_host(request, handler):
+        # Blocks DNS rebinding: another website pointing its own name at this server's address.
+        if request.url.host not in hosts:
+            raise web.HTTPForbidden(text=f"unknown host {request.host}: add it to web.allowed_hosts")
+        return await handler(request)
+
+    app = web.Application(middlewares=[known_host, errors])
     app.add_routes(routes)
     app.router.add_static("/", static_dir)
     return app

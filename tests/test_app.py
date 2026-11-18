@@ -58,6 +58,8 @@ async def main():
                 assert r.status == 403, (bad, r.status)
         async with http.get(f"{api}/") as r:
             assert "hi" in await r.text()
+        async with http.get(f"{api}/api/snoozes", headers={"Host": "evil.example"}) as r:
+            assert r.status == 403, r.status  # DNS rebinding
         # Files people send you are served from this origin, so they must never run as the app.
         async with http.get(f"{api}/api/beeper/v1/assets/serve", params={"url": "mxc://local/x"}) as r:
             assert r.status == 200 and r.headers["Content-Security-Policy"] == "sandbox", r.headers
