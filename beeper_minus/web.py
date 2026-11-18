@@ -54,12 +54,16 @@ def make_app(beeper, db, transcriber, static_dir, save_token):
         path = request.raw_path[len("/api/beeper"):]
         if not path.startswith(PROXIED) or ".." in urllib.parse.unquote(path):
             raise web.HTTPForbidden()
-        if path.startswith(RESET) and (await beeper.call("GET", "/v1/app/setup"))["state"] != "needs-cross-signing-setup":
+        # Beeper may match routes case-insensitively or decoded, so compare the same way.
+        if RESET in urllib.parse.unquote(path).lower() and (await beeper.call("GET", "/v1/app/setup"))["state"] != "needs-cross-signing-setup":
             raise web.HTTPForbidden(text="the recovery key can only be created while setting up encryption")
         headers = {k: request.headers[k] for k in PASS_REQ if k in request.headers}
         data = await request.read() if request.can_read_body else None
         async with beeper.raw.request(request.method, URL(beeper.url + path, encoded=True), headers=headers, data=data) as r:
-            resp = web.StreamResponse(status=r.status, headers={k: r.headers[k] for k in PASS_RESP if k in r.headers})
+            headers = {k: r.headers[k] for k in PASS_RESP if k in r.headers}
+            # Attachments are served from this origin: an .html or .svg someone sends you must not run as the app.
+            headers |= {"Content-Security-Policy": "sandbox", "X-Content-Type-Options": "nosniff"}
+            resp = web.StreamResponse(status=r.status, headers=headers)
             await resp.prepare(request)
             async for chunk in r.content.iter_chunked(1 << 16):
                 await resp.write(chunk)

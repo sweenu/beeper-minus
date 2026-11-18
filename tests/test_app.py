@@ -58,6 +58,9 @@ async def main():
                 assert r.status == 403, (bad, r.status)
         async with http.get(f"{api}/") as r:
             assert "hi" in await r.text()
+        # Files people send you are served from this origin, so they must never run as the app.
+        async with http.get(f"{api}/api/beeper/v1/assets/serve", params={"url": "mxc://local/x"}) as r:
+            assert r.status == 200 and r.headers["Content-Security-Policy"] == "sandbox", r.headers
 
         # Snooze archives now and unarchives once due.
         async with http.post(f"{api}/api/snoozes", json={"chatID": bob, "until": 1}) as r:
@@ -161,6 +164,8 @@ async def setup_flow(static):
             # Only a brand new account may create a recovery key; the token is now sent along.
             async with http.post(f"{api}/verification/recovery-key/reset", json={}) as r:
                 assert r.status == (200 if state == "needs-cross-signing-setup" else 403), (state, r.status)
+            async with http.post(f"{api}/verification/Recovery-Key/RES%45T", json={}) as r:
+                assert state == "needs-cross-signing-setup" or r.status == 403, r.status
             if state == "needs-verification":
                 async with http.post(f"{api}/verification/recovery-key", json={"recoveryKey": "wrong"}) as r:
                     assert r.status == 400
