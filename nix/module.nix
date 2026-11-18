@@ -106,7 +106,8 @@ in
     })
 
     (mkIf cfg.enable {
-      services.beeper-minus.settings.beeper.url = mkDefault "http://${server.host}:${toString server.port}";
+      services.beeper-minus.settings.beeper.url =
+        mkDefault "http://${server.host}:${toString server.port}";
 
       systemd.services.beeper-minus = {
         description = "Beeper Minus";
