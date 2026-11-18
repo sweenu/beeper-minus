@@ -32,8 +32,11 @@ port = 8099
 # Leave unset to turn transcription off entirely.
 engine = "whisper-cpp"
 # Transcribe incoming voice notes as they arrive. Without it, transcribe on demand from the web app.
-auto = true
-# Also post every transcript to this chat (your "Note to self"); omit to keep them in the web app only.
+auto = false
+# Also post every transcript, automatic or requested from the web app, to your Note to self chat.
+# Off: transcripts only show in the web app.
+notes_to_self = false
+# Beeper Minus finds Note to self on its own (the chat with only you in it). Set its ID if it can't.
 # notes_to_self_chat_id = "!abcdefghijklmnop:beeper.com"
 # Times in these notes use the server's time zone: set it to yours (NixOS: time.timeZone, else TZ).
 # Automatic mode ignores voice notes older than this (account linking backfills old history).

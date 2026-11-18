@@ -98,7 +98,7 @@ Pitfalls:
 - **The `openai` engine uploads voice notes to the provider you configure**, including voice notes from
   chats that are end-to-end encrypted on their network (Signal, WhatsApp...). Their senders didn't agree
   to that: prefer a local engine, or a server you run yourself.
-- **`notes_to_self_chat_id` turns voice notes into text in your Note to self chat**, which syncs to all
+- **`notes_to_self` turns voice notes into text in your Note to self chat**, which syncs to all
   your Beeper devices like any other chat.
 - **Transcripts stay in the database** until you delete them. Beeper Minus has no expiry.
 

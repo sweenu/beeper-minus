@@ -48,7 +48,9 @@ def seed():
             chat("!family:beeper.com", "Family 🏡", "Signal", 30, type="group"),
             chat("!bob:beeper.com", "Bob Martin", "Telegram", 120),
             chat("!old:beeper.com", "Old project", "Slack", 6000, type="group", archived=True),
-            chat(NOTE, "Note to self", "Beeper", 9000),
+            # Only you in it, on your Beeper account; Signal's own self-chat must not be mistaken for it.
+            {**chat(NOTE, "Note to self", "Beeper", 9000), "accountID": "matrix", "participants": {"items": [{"id": "me", "isSelf": True}], "hasMore": False, "total": 1}},
+            {**chat("!signal-self:beeper.com", "Note to Self", "Signal", 9500), "participants": {"items": [{"id": "me", "isSelf": True}], "hasMore": False, "total": 1}},
         ]
     }
     messages = {cid: [] for cid in chats}
@@ -161,6 +163,10 @@ def make_app(state="ready"):
     @routes.get("/v1/accounts")
     async def accounts(request):
         return web.json_response([{"accountID": "whatsapp", "network": "WhatsApp", "status": "connected", "user": {"id": "me", "isSelf": True}, "bridge": {}}])
+
+    @routes.get("/v1/chats")
+    async def list_chats(request):
+        return web.json_response({"items": [with_preview(c) for c in chats.values()], "hasMore": False})
 
     @routes.get("/v1/chats/search")
     async def search(request):

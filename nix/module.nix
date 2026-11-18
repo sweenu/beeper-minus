@@ -59,7 +59,7 @@ in
           transcription = {
             engine = "whisper-cpp";
             auto = true;
-            notes_to_self_chat_id = "!abc:beeper.com";
+            notes_to_self = true;
             whisper-cpp.model = "''${model}";
           };
         }

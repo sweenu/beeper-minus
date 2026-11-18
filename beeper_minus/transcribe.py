@@ -97,7 +97,10 @@ class Transcriber:
         self.beeper = beeper
         self.db = db
         self.engine = ENGINES[cfg["engine"]](cfg.get(cfg["engine"], {}))
+        self.notes_to_self = cfg.get("notes_to_self", False)
         self.note_chat_id = cfg.get("notes_to_self_chat_id")
+        if self.note_chat_id and not self.notes_to_self:
+            log.warning("notes_to_self_chat_id is set but notes_to_self is off: transcripts won't be posted there")
         # Never auto-transcribe older messages: linking an account backfills its history,
         # and the live feed reports every old message as new.
         self.max_age = timedelta(days=cfg.get("max_age_days", 3))
@@ -116,6 +119,29 @@ class Transcriber:
                 async for chunk in r.content.iter_chunked(1 << 16):
                     f.write(chunk)
         return dest
+
+    async def note_chat(self):
+        """Your Note to self chat. Beeper's API doesn't flag it, so look for the chat with nobody but you in it."""
+        if self.note_chat_id is None:
+            mine, cursor = [], {}
+            while True:
+                page = await self.beeper.call("GET", "/v1/chats", limit=200, **cursor)
+                mine += [
+                    c for c in page["items"]
+                    if c.get("type") == "single" and not c["participants"].get("hasMore")
+                    and c["participants"]["items"] and all(p.get("isSelf") for p in c["participants"]["items"])
+                ]
+                if not page.get("hasMore"):
+                    break
+                cursor = {"cursor": page["oldestCursor"], "direction": "before"}
+            # Networks have self-chats too (Signal's Note to Self...): prefer the one on your Beeper account.
+            found = [c for c in mine if c.get("accountID") == "matrix"] or mine
+            if len(found) != 1:
+                names = ", ".join(f"{c.get('title')} ({c['id']})" for c in found) or "none"
+                raise RuntimeError(f"can't tell which chat is Note to self (found: {names}): set transcription.notes_to_self_chat_id")
+            self.note_chat_id = found[0]["id"]
+            log.info("Note to self is %s", self.note_chat_id)
+        return self.note_chat_id
 
     async def transcribe(self, msg, chat=None):
         """Transcribe a message's audio, store it, and post it to Note to self if configured."""
@@ -152,8 +178,8 @@ class Transcriber:
             "created_at": now_ms(),
         }
         # Post first: if it fails, no row is stored and the note is retried instead of never posted.
-        if self.note_chat_id:
-            await self.beeper.send(self.note_chat_id, format_note(row, chat))
+        if self.notes_to_self:
+            await self.beeper.send(await self.note_chat(), format_note(row, chat))
         self.db.execute(f"insert or replace into transcriptions ({', '.join(row)}) values ({', '.join('?' * len(row))})", tuple(row.values()))
         log.info("transcribed %s/%s (%s)", row["chat_id"], row["message_id"], lang)
         return row

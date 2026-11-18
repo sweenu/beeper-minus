@@ -58,7 +58,7 @@ for a headless "transcribe into Note to self" setup.
               transcription = {
                 engine = "whisper-cpp";
                 auto = true;
-                notes_to_self_chat_id = "!abc:beeper.com";
+                notes_to_self = true;
                 whisper-cpp.model = pkgs.fetchurl {
                   url = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin";
                   hash = "sha256-H8cPd0046xaZk6w5Huo1fvR8iHV+9y7llDh5t+jivGk=";

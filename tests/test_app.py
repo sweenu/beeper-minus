@@ -37,7 +37,7 @@ async def main():
 
     beeper = Beeper("http://127.0.0.1:23399", fake_beeper.TOKEN)
     db = open_db(tmp / "db.sqlite")
-    cfg = {"engine": "whisper-cpp", "whisper-cpp": {"model": "x", "command": str(whisper), "languages": ["fr", "en"]}, "notes_to_self_chat_id": fake_beeper.NOTE}
+    cfg = {"engine": "whisper-cpp", "whisper-cpp": {"model": "x", "command": str(whisper), "languages": ["fr", "en"]}, "notes_to_self": True}
     transcriber = Transcriber(cfg, beeper, db)
     static = tmp / "static"
     static.mkdir()
@@ -107,12 +107,26 @@ async def main():
         await scheduler.tick(beeper, db)
         assert not rows(db, "select * from scheduled")
 
-        # On-demand transcription from the web app, posted to Note to self too.
+        # Off by default: transcripts stay in the web app, even with a Note to self chat ID set.
+        quiet = Transcriber({**cfg, "notes_to_self": False, "notes_to_self_chat_id": fake_beeper.NOTE}, beeper, open_db(":memory:"))
+        notes = len(messages[fake_beeper.NOTE])
+        assert (await quiet.transcribe(messages[alice][2]))["text"] == "Bonjour, ça va ?"
+        assert len(messages[fake_beeper.NOTE]) == notes
+
+        # On-demand transcription from the web app, posted to Note to self too, which is found on its own.
         async with http.post(f"{api}/api/transcriptions", json={"chatID": alice, "messageID": "a3"}) as r:
             t = await r.json()
             assert r.status == 200, t
         assert t["text"] == "Bonjour, ça va ?" and t["language"] == "fr" and t["duration"] == 3, t
-        assert "Bonjour, ça va ?" in messages[fake_beeper.NOTE][-1]["text"]
+        assert "Bonjour, ça va ?" in messages[fake_beeper.NOTE][-1]["text"] and transcriber.note_chat_id == fake_beeper.NOTE
+        # Two self-chats and neither on the Beeper account: ask for the ID rather than guess.
+        chats[fake_beeper.NOTE]["accountID"] = "beeper"
+        try:
+            await Transcriber(cfg, beeper, db).note_chat()
+            raise AssertionError("picked a Note to self out of two candidates")
+        except RuntimeError as e:
+            assert "found: Note to self (!note:beeper.com), Note to Self (!signal-self:beeper.com)" in str(e), e
+        chats[fake_beeper.NOTE]["accountID"] = "matrix"
         notes = len(messages[fake_beeper.NOTE])
         async with http.post(f"{api}/api/transcriptions", json={"chatID": alice, "messageID": "a3"}) as r:
             assert (await r.json())["text"] == "Bonjour, ça va ?"
