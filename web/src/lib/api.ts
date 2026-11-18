@@ -39,6 +39,43 @@ export interface Page<T> {
   oldestCursor?: string
 }
 
+export interface Account {
+  accountID: string
+  loginID?: string
+  network?: string
+  status: string
+  statusText?: string
+  user?: { fullName?: string; username?: string; phoneNumber?: string; email?: string }
+}
+
+export interface Bridge {
+  id: string
+  displayName: string
+  provider: 'cloud' | 'self-hosted' | 'local' | 'platform-sdk'
+  status: string
+  accounts: Account[]
+}
+
+export interface LoginField { id: string; label?: string; name?: string; type?: string; placeholder?: string; optional?: boolean; initialValue?: string }
+
+export type LoginStep = { stepID: string; instructions?: string } & (
+  | { type: 'user_input'; fields: LoginField[] }
+  | { type: 'cookies'; url: string; fields: LoginField[] }
+  | { type: 'display_and_wait'; display: { type: 'qr' | 'code'; data: string } | { type: 'emoji'; imageURL: string } | { type: 'nothing' } }
+  | { type: 'complete' }
+)
+
+export interface LoginSession {
+  bridgeID: string
+  loginSessionID: string
+  status: 'waiting_for_input' | 'waiting_for_cookies' | 'waiting_for_display' | 'complete' | 'cancelled' | 'failed'
+  currentStep?: LoginStep
+  error?: { message: string }
+}
+
+// Healthy account states; anything else needs the user.
+export const WORKING = ['connected', 'connecting', 'backfilling']
+
 // Beeper Minus' own records.
 export interface Snooze { chat_id: string; chat_title: string; network: string; until: number }
 export interface Scheduled { id: number; chat_id: string; chat_title: string; network: string; text: string; send_at: number; error: string | null }

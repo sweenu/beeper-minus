@@ -55,7 +55,9 @@ async def main():
             assert r.status == 200 and all(not c["isArchived"] for c in (await r.json())["items"])
         async with http.get(f"{api}/api/beeper/v1/chats/%21alice%3Abeeper.com/messages") as r:
             assert r.status == 200, r.status
-        for bad in ("/api/beeper/v1/bridges", "/api/beeper/v1/chats/../bridges", "/api/beeper/v1/chats/%2e%2e/bridges"):
+        for bad in ("/api/beeper/v1/info", "/api/beeper/v1/chats/../info", "/api/beeper/v1/chats/%2e%2e/info",
+                    "/api/beeper/v1/bridges/local-whatsapp/logins", "/api/beeper/v1/bridges/local-whatsapp/LOGINS/x/remove",
+                    "/api/beeper/v1/bridges/local-whatsapp/%6Cogins/x/remove"):
             async with http.get(api + bad) as r:
                 assert r.status == 403, (bad, r.status)
         async with http.get(f"{api}/") as r:
@@ -71,6 +73,19 @@ async def main():
         # Files people send you are served from this origin, so they must never run as the app.
         async with http.get(f"{api}/api/beeper/v1/assets/serve", params={"url": "mxc://local/x"}) as r:
             assert r.status == 200 and r.headers["Content-Security-Policy"] == "sandbox", r.headers
+
+        # Linking an on-device network: each step answered through the proxy, the wait step held open.
+        wa = f"{api}/api/beeper/v1/bridges/local-whatsapp/login-sessions"
+        async with http.post(wa, json={"flowID": "phone"}) as r:
+            sess = await r.json()
+        while sess["status"] != "complete":
+            step = sess["currentStep"]
+            body = {"type": step["type"]} | ({"fields": {"phone": "+33600000000"}} if step["type"] == "user_input" else {})
+            async with http.post(f"{wa}/{sess['loginSessionID']}/steps/{step['stepID']}", json=body) as r:
+                assert r.status == 200, await r.text()
+                sess = await r.json()
+        async with http.get(f"{api}/api/beeper/v1/accounts") as r:
+            assert {"accountID": "local-whatsapp_me", "status": "connected"}.items() <= next(a for a in await r.json() if a["network"] == "WhatsApp").items()
 
         # Snooze archives now and unarchives once due.
         async with http.post(f"{api}/api/snoozes", json={"chatID": bob, "until": 1}) as r:

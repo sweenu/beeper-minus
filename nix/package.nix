@@ -20,7 +20,7 @@ let
         ]
       );
     };
-    npmDepsHash = "sha256-quo+BLCaO83Y8qUOZ4n9qMnQAHEsxnhRc6gviOJ3dEU=";
+    npmDepsHash = "sha256-zplOPoBvyHzYstQcC45uGwHLPne+xrRKxFlqf2UjLho=";
     installPhase = "cp -r dist $out";
   };
 in

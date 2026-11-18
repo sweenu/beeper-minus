@@ -50,8 +50,8 @@ Pitfalls:
 ## Built-in protections
 
 - **The browser never sees the Beeper token.** The backend adds it to the requests it forwards to
-  Beeper, and it only forwards accounts, chats, messages, media and setup endpoints. Login, bridges and
-  everything else stay out of reach.
+  Beeper, and it only forwards accounts, chats, messages, media, setup and network sign-in endpoints.
+  Removing a network's login, and everything else, stays out of reach.
 - **Other websites can't act through your browser.** A page you visit can make your browser send
   requests to the app. Any request that changes something is refused unless it comes from the app's own
   page (`Sec-Fetch-Site` / `Origin`). Clients that send neither header, like `curl`, are let through:

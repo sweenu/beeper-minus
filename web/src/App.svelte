@@ -6,6 +6,7 @@
   import ScheduledPage from './pages/Scheduled.svelte'
   import Transcriptions from './pages/Transcriptions.svelte'
   import Setup from './pages/Setup.svelte'
+  import Accounts from './pages/Accounts.svelte'
   import { beeper, config } from './lib/api'
 
   let hash = $state(location.hash || '#/')
@@ -65,6 +66,8 @@
       <Snoozed />
     {:else if parts[0] === 'scheduled'}
       <ScheduledPage />
+    {:else if parts[0] === 'accounts'}
+      <Accounts />
     {:else if parts[0] === 'transcriptions'}
       <Transcriptions />
     {:else}

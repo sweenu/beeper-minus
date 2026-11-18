@@ -1,7 +1,7 @@
 <script lang="ts">
   import Icon from '../lib/Icon.svelte'
   import { onMount } from 'svelte'
-  import { api, beeper, chatPath, schedule, snooze, type Chat, type Page, type Snooze } from '../lib/api'
+  import { api, beeper, chatPath, schedule, snooze, WORKING, type Account, type Chat, type Page, type Snooze } from '../lib/api'
   import { when } from '../lib/time'
   import { previewText } from '../lib/preview'
   import WhenPicker from '../lib/WhenPicker.svelte'
@@ -17,6 +17,7 @@
   let error = $state('')
   let notice = $state('')
   let picker = $state<Picker | null>(null)
+  let broken = $state<Account[]>([])
 
   async function load(more = false) {
     loading = true
@@ -41,6 +42,7 @@
 
   onMount(() => {
     load()
+    beeper<Account[]>('/accounts').then((a) => (broken = a.filter((x) => !WORKING.includes(x.status))), () => {})
     api<Snooze[]>('/api/snoozes').then((s) => (snoozes = Object.fromEntries(s.map((x) => [x.chat_id, x.until]))), () => {})
   })
 
@@ -68,7 +70,15 @@
     })
 </script>
 
-<h1>{archived ? 'Archived' : 'Inbox'}</h1>
+<header class="title">
+  <h1>{archived ? 'Archived' : 'Inbox'}</h1>
+  <a href="#/accounts" class="icon" title="Accounts" aria-label="Accounts"><Icon name="accounts" /></a>
+</header>
+{#if broken.length}
+  <p class="error banner" role="status">
+    {broken.map((a) => a.network ?? a.accountID).join(', ')} {broken.length > 1 ? 'need' : 'needs'} attention. <a href="#/accounts">Open Accounts</a>
+  </p>
+{/if}
 {#if notice}<p class="notice" role="status">{notice}</p>{/if}
 {#if error}<p class="error" role="alert">{error} <button onclick={() => load()}>Retry</button></p>{/if}
 

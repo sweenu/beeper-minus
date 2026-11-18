@@ -160,9 +160,96 @@ def make_app(state="ready"):
     def with_preview(c):
         return {**c, "preview": (messages[c["id"]] or [None])[-1]}
 
+    def bridge(id, name, provider, flows, accounts=()):
+        return {"id": id, "displayName": name, "provider": provider, "status": "available", "type": id.removeprefix("local-"),
+                "network": name.lower(), "supportsMultipleAccounts": False, "accounts": list(accounts), "flows": flows}
+
+    def account(bridge, status="connected"):
+        return {"accountID": f"{bridge['id']}_me", "network": bridge["displayName"], "status": status, "user": {"id": "me", "fullName": "Me", "isSelf": True},
+                "bridge": {"id": bridge["id"], "provider": bridge["provider"], "type": bridge["type"]}}
+
+    # Each flow is a script of login steps; the last one connects the account.
+    qr = [{"type": "display_and_wait", "instructions": "Scan this QR code with WhatsApp on your phone", "display": {"type": "qr", "data": f"2@fake-qr-{n}"}} for n in (1, 2)]
+    phone = [
+        {"type": "user_input", "instructions": "Enter your WhatsApp phone number", "fields": [{"id": "phone", "label": "Phone number", "type": "tel", "placeholder": "+33 6 12 34 56 78"}]},
+        {"type": "display_and_wait", "instructions": "In WhatsApp, open Linked devices, tap Link with phone number, and type this code", "display": {"type": "code", "data": "FAKE-CODE"}},
+    ]
+    cookies = [{"type": "cookies", "url": "https://www.linkedin.com/login", "instructions": "Sign in to LinkedIn, then paste these cookies", "fields": [{"id": "li_at", "name": "li_at", "type": "cookie"}, {"id": "jsession", "name": "JSESSIONID", "type": "cookie"}]}]
+    discord = bridge("discordgo", "Discord", "cloud", [])
+    discord["accounts"].append(account(discord, "connection_required"))
+    bridges = app["bridges"] = {b["id"]: b for b in [
+        bridge("local-whatsapp", "WhatsApp", "local", {"qr": ("QR code", qr), "phone": ("Pairing code", phone)}),
+        bridge("local-linkedin", "LinkedIn", "local", {"cookies": ("Browser cookies", cookies)}),
+        discord,
+    ]}
+    sessions = {}
+
+    def public(b):
+        return {k: v for k, v in b.items() if k != "flows"} | {"activeAccountCount": len(b["accounts"])}
+
     @routes.get("/v1/accounts")
     async def accounts(request):
-        return web.json_response([{"accountID": "whatsapp", "network": "WhatsApp", "status": "connected", "user": {"id": "me", "isSelf": True}, "bridge": {}}])
+        return web.json_response([a for b in bridges.values() for a in b["accounts"]])
+
+    @routes.get("/v1/bridges")
+    async def list_bridges(request):
+        return web.json_response({"items": [public(b) for b in bridges.values()]})
+
+    @routes.get("/v1/bridges/{id}/login-flows")
+    async def login_flows(request):
+        b = bridges[request.match_info["id"]]
+        return web.json_response({"items": [{"id": k, "name": name} for k, (name, _) in b["flows"].items()]})
+
+    def view(sess):
+        out = {k: sess[k] for k in ("bridgeID", "loginSessionID", "status", "accountID", "account", "error") if sess.get(k)}
+        if sess["status"].startswith("waiting"):
+            out["currentStep"] = sess["steps"][0] | {"stepID": f"step{len(sess['steps'])}"}
+        return web.json_response(out)
+
+    def advance(sess):
+        sess["steps"].pop(0)
+        if sess["steps"]:
+            sess["status"] = {"user_input": "waiting_for_input", "cookies": "waiting_for_cookies", "display_and_wait": "waiting_for_display"}[sess["steps"][0]["type"]]
+            return
+        b = bridges[sess["bridgeID"]]
+        b["accounts"] = [a for a in b["accounts"] if a["accountID"] != f"{b['id']}_me"] + [account(b)]
+        sess.update(status="complete", account=b["accounts"][-1])
+
+    @routes.post("/v1/bridges/{id}/login-sessions")
+    async def login_start(request):
+        b = bridges[request.match_info["id"]]
+        body = await request.json() if request.can_read_body else {}
+        flow = body.get("flowID") or next(iter(b["flows"]))
+        sess = {"bridgeID": b["id"], "loginSessionID": f"ls{len(sessions) + 1}", "accountID": body.get("accountID"), "steps": [dict(x) for x in b["flows"][flow][1]]}
+        sessions[sess["loginSessionID"]] = sess
+        sess["steps"].insert(0, {})
+        advance(sess)
+        return view(sess)
+
+    @routes.get("/v1/bridges/{id}/login-sessions/{sid}")
+    async def login_get(request):
+        return view(sessions[request.match_info["sid"]])
+
+    @routes.delete("/v1/bridges/{id}/login-sessions/{sid}")
+    async def login_cancel(request):
+        sessions[request.match_info["sid"]]["status"] = "cancelled"
+        return web.json_response({"bridgeID": request.match_info["id"], "loginSessionID": request.match_info["sid"], "status": "cancelled"})
+
+    @routes.post("/v1/bridges/{id}/login-sessions/{sid}/steps/{step}")
+    async def login_step(request):
+        sess, body = sessions[request.match_info["sid"]], await request.json()
+        step = sess["steps"][0] if sess["status"].startswith("waiting") else None
+        if not step or request.match_info["step"] != f"step{len(sess['steps'])}" or body.get("type") != step["type"]:
+            return web.json_response({"message": "Login step does not match the current session state", "code": "INVALID_LOGIN_STEP"}, status=409)
+        if step["type"] == "display_and_wait":
+            await asyncio.sleep(1)  # like Beeper: answers once the phone scanned the code (or the code refreshed)
+        elif any(not (body.get("fields") or {}).get(f["id"]) for f in step["fields"]):
+            return web.json_response({"message": "Missing field", "code": "invalid_parameter"}, status=400)
+        elif (body.get("fields") or {}).get("phone") == "0":
+            sess.update(status="failed", error={"message": "That number isn't on WhatsApp", "code": "login_failed"})
+            return view(sess)
+        advance(sess)
+        return view(sess)
 
     @routes.get("/v1/chats")
     async def list_chats(request):
