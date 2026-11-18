@@ -31,6 +31,7 @@ engine = "whisper-cpp"
 auto = true
 # Also post every transcript to this chat (your "Note to self"); omit to keep them in the web app only.
 # notes_to_self_chat_id = "!abcdefghijklmnop:beeper.com"
+# Times in these notes use the server's time zone: set it to yours (NixOS: time.timeZone, else TZ).
 # Automatic mode ignores voice notes older than this (account linking backfills old history).
 max_age_days = 3
 

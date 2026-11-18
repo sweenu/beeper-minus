@@ -43,7 +43,7 @@ async def run(cfg):
     if transcriber and t.get("auto", False):
         tasks.append(after_sign_in(transcriber.run()))
     if w.get("enable", True):
-        static = os.environ.get("BEEPER_MINUS_STATIC") or w.get("static_dir") or Path(__file__).parent.parent / "web" / "dist"
+        static = os.environ.get("BEEPER_MINUS_STATIC") or Path(__file__).parent.parent / "web" / "dist"
         host = w.get("host", "127.0.0.1")
         hosts = {h.lower() for h in ("localhost", "127.0.0.1", "::1", host, *w.get("allowed_hosts", []))}
         app = web.make_app(beeper, db, transcriber, static, save_token, hosts)
