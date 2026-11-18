@@ -17,7 +17,7 @@ PASS_REQ = ("Content-Type", "Range", "Accept-Encoding", "If-None-Match", "If-Mod
 PASS_RESP = ("Content-Type", "Content-Length", "Content-Encoding", "Content-Range", "Accept-Ranges", "ETag", "Last-Modified", "Cache-Control")
 
 
-def make_app(beeper, db, transcriber, static_dir, save_token, hosts=("localhost", "127.0.0.1", "::1")):
+def make_app(beeper, db, transcriber, static_dir, save_token, hosts=("localhost", "127.0.0.1", "::1"), users=None):
     routes = web.RouteTableDef()
 
     async def body(request, *required):
@@ -176,10 +176,28 @@ def make_app(beeper, db, transcriber, static_dir, save_token, hosts=("localhost"
             raise web.HTTPForbidden(text=f"unknown host {request.host}: add it to web.allowed_hosts")
         return await handler(request)
 
-    app = web.Application(middlewares=[known_host, errors])
+    @web.middleware
+    async def allowed_user(request, handler):
+        # tailscale serve sets this header for tailnet users and strips any value a client sends.
+        login = request.headers.get("Tailscale-User-Login", "").lower()
+        if users and login not in users:
+            raise web.HTTPForbidden(text=f"{login or 'this request'} is not in web.allowed_users (open it through tailscale serve)")
+        return await handler(request)
+
+    app = web.Application(middlewares=[known_host, allowed_user, same_origin, errors])
     app.add_routes(routes)
     app.router.add_static("/", static_dir)
     return app
+
+
+@web.middleware
+async def same_origin(request, handler):
+    # Any website you visit can make your browser send it requests; only the app's own page may change things.
+    if request.method not in ("GET", "HEAD", "OPTIONS"):
+        site, origin = request.headers.get("Sec-Fetch-Site"), request.headers.get("Origin")
+        if site not in (None, "same-origin", "none") or (origin and urllib.parse.urlsplit(origin).netloc != request.host):
+            raise web.HTTPForbidden(text="cross-site request refused")
+    return await handler(request)
 
 
 @web.middleware

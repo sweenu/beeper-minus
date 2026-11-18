@@ -20,6 +20,10 @@ port = 8099
 # Names you open the web app with, besides localhost and `host`: a reverse proxy's domain, a Tailscale name...
 # Requests for any other Host are refused, so another website can't reach the app through DNS rebinding.
 # allowed_hosts = ["beeper.example.com"]
+# Only let these Tailscale users in, as `tailscale serve` identifies them (Tailscale-User-Login). Then the
+# app must only be reached through tailscale serve: requests without the header, or from tagged devices, are
+# refused, and keep `host` on localhost so nobody can send the header themselves.
+# allowed_users = ["you@github"]
 
 # Snooze and send later need no configuration.
 

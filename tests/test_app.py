@@ -60,6 +60,12 @@ async def main():
             assert "hi" in await r.text()
         async with http.get(f"{api}/api/snoozes", headers={"Host": "evil.example"}) as r:
             assert r.status == 403, r.status  # DNS rebinding
+        # Other websites can make the browser send requests, but not change anything.
+        for headers in ({"Origin": "https://evil.example"}, {"Sec-Fetch-Site": "cross-site"}):
+            async with http.post(f"{api}/api/snoozes", json={"chatID": bob, "until": 1}, headers=headers) as r:
+                assert r.status == 403, (headers, r.status)
+        async with http.delete(f"{api}/api/scheduled/1", headers={"Origin": "http://127.0.0.1:23398", "Sec-Fetch-Site": "same-origin"}) as r:
+            assert r.status == 200, r.status
         # Files people send you are served from this origin, so they must never run as the app.
         async with http.get(f"{api}/api/beeper/v1/assets/serve", params={"url": "mxc://local/x"}) as r:
             assert r.status == 200 and r.headers["Content-Security-Policy"] == "sandbox", r.headers
@@ -148,7 +154,20 @@ async def main():
     await runner.cleanup()
     await fake_runner.cleanup()
     await setup_flow(static)
+    await tailscale_users(static)
     print("ok")
+
+
+async def tailscale_users(static):
+    """With web.allowed_users, only the listed Tailscale users (as tailscale serve reports them) get in."""
+    runner = web.AppRunner(bm_web.make_app(None, open_db(":memory:"), None, static, None, users={"me@github"}))
+    await runner.setup()
+    await web.TCPSite(runner, "127.0.0.1", 23395).start()
+    async with ClientSession() as http:
+        for login, status in ((None, 403), ("someone@github", 403), ("Me@GitHub", 200)):
+            async with http.get("http://127.0.0.1:23395/api/snoozes", headers={"Tailscale-User-Login": login} if login else {}) as r:
+                assert r.status == status, (login, r.status)
+    await runner.cleanup()
 
 
 async def setup_flow(static):

@@ -30,7 +30,11 @@ for a headless "transcribe into Note to self" setup.
 > The web app has no authentication and can read and send your messages. It listens on localhost by default;
 > expose it only behind an authenticating reverse proxy (or a private network like Tailscale).
 > It only answers requests for `localhost`, `web.host` and the names in `web.allowed_hosts`: list the
-> name you open it with (your proxy's domain, your Tailscale name).
+> name you open it with (your proxy's domain, your Tailscale name). Changes are only accepted from the
+> app's own page, so other websites you visit can't send messages through it.
+>
+> With `tailscale serve` in front, `web.allowed_users` turns on a real login: only the Tailscale users
+> listed get in.
 
 ## NixOS
 
