@@ -13,7 +13,8 @@
   }
 
   let bridges = $state<Bridge[] | null>(null)
-  let logins = $state<Record<string, BridgeLogin[]>>({})
+  // Per network at its limit: your logins for it on any device, null if Beeper wouldn't say.
+  let logins = $state<Record<string, BridgeLogin[] | null>>({})
   let linking = $state<Linking | null>(null)
   let fields = $state<Record<string, string>>({})
   let busy = $state(false)
@@ -26,7 +27,10 @@
   // network already working through another bridge (Telegram in Beeper Cloud...) needs nothing here.
   const shown = $derived(
     (bridges ?? []).filter(
-      (b) => b.accounts.length || (b.provider === 'local' && !(bridges ?? []).some((o) => o.accounts.length && network(o) === network(b))),
+      (b) =>
+        b.accounts.length ||
+        // local-dummy is Beeper's test network.
+        (b.provider === 'local' && b.id !== 'local-dummy' && !(bridges ?? []).some((o) => o.accounts.length && network(o) === network(b))),
     ),
   )
   const step = $derived(linking?.session?.currentStep)
@@ -37,7 +41,10 @@
       // At the plan's limit, the account already has a login for that network, likely on another device:
       // this server can join it instead of adding a new one.
       for (const b of bridges.filter((b) => b.status === 'limit_reached' && !b.accounts.length)) {
-        beeper<{ items: BridgeLogin[] }>(`/bridges/${enc(b.id)}/logins`).then((r) => (logins = { ...logins, [b.id]: r.items }), () => {})
+        beeper<{ items: BridgeLogin[] }>(`/bridges/${enc(b.id)}/logins`).then(
+          (r) => (logins = { ...logins, [b.id]: r.items }),
+          () => (logins = { ...logins, [b.id]: null }),
+        )
       }
     } catch (e) {
       error = (e as Error).message
@@ -191,10 +198,12 @@
       <li class="card account">
         <div class="line">
           <strong>{b.displayName}</strong>
-          {#if b.status === 'limit_reached' && !logins[b.id]?.length}
-            <span class="error">account limit reached</span>
-          {:else}
-            <span class="muted">{b.status === 'limit_reached' ? 'on another device' : 'not connected'}</span>
+          {#if b.status !== 'limit_reached'}
+            <span class="muted">not connected</span>
+          {:else if logins[b.id]?.length}
+            <span class="muted">on another device</span>
+          {:else if b.id in logins}
+            <span class="muted">not in your plan</span>
           {/if}
         </div>
         <div class="line">
@@ -207,12 +216,9 @@
             <button disabled={!!linking} onclick={() => start(b, undefined, l.loginID)}>Add to this server</button>
           </div>
         {/each}
-        {#if b.status === 'limit_reached' && !logins[b.id]?.length}
-          <p class="meta">
-            Your Beeper account already has a {b.displayName} account, maybe linked on another device (like a Beeper Server you
-            reset), and your plan allows no more. Remove that one in Beeper's settings on your phone or computer, then reload this
-            page to link {b.displayName} here.
-          </p>
+        {#if b.status === 'limit_reached' && b.id in logins && !logins[b.id]?.length}
+          <!-- Beeper's free plan gives networks it doesn't list an allowance of zero. -->
+          <p class="meta">Your Beeper plan doesn't include {b.displayName}, or allows no more {b.displayName} accounts.</p>
         {/if}
       </li>
     {/if}

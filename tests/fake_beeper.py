@@ -186,6 +186,9 @@ def make_app(state="ready"):
         bridge("local-signal", "Signal", "local", {"qr": ("QR code", qr)}) | {"status": "limit_reached"},
         telegram,
         bridge("local-telegram", "Telegram", "local", {}) | {"status": "limit_reached"},
+        # Not part of the free plan, and Beeper's test network.
+        bridge("local-bluesky", "Bluesky", "local", {}) | {"status": "limit_reached"},
+        bridge("local-dummy", "Dummy Bridge", "local", {}) | {"status": "limit_reached"},
         discord,
     ]}
     sessions = {}
