@@ -7,6 +7,7 @@
   import Transcriptions from './pages/Transcriptions.svelte'
   import Setup from './pages/Setup.svelte'
   import Accounts from './pages/Accounts.svelte'
+  import Search from './lib/Search.svelte'
   import { beeper, config } from './lib/api'
 
   let hash = $state(location.hash || '#/')
@@ -48,6 +49,7 @@
     <button onclick={() => location.reload()}>Try again</button>
   </main>
 {:else if setup === 'done'}
+<header class="topbar"><Search /></header>
 {#if parts[0] !== 'chats'}
   <nav>
     {#each tabs as [href, icon, label] (href)}

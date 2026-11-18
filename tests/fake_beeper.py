@@ -278,8 +278,12 @@ def make_app(state="ready"):
 
     @routes.get("/v1/chats/search")
     async def search(request):
-        inbox = request.query.get("inbox")
-        items = [with_preview(c) for c in chats.values() if inbox is None or (inbox == "archive") == c["isArchived"]]
+        inbox, words = request.query.get("inbox"), request.query.get("query", "").lower().split()
+        # Like Beeper's "titles" scope: every word in the title or the network name.
+        items = [
+            with_preview(c) for c in chats.values()
+            if (inbox is None or (inbox == "archive") == c["isArchived"]) and all(w in f"{c['title']} {c['network']}".lower() for w in words)
+        ]
         items.sort(key=lambda c: c["lastActivity"], reverse=True)
         return web.json_response({"items": items, "hasMore": False})
 
