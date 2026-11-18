@@ -24,6 +24,8 @@ async def run(cfg):
     signed_in = asyncio.Event()
     if token:
         signed_in.set()
+    else:
+        logging.warning("no Beeper token yet: snooze, send later and transcription wait for the web app's setup screen")
 
     def save_token(token):
         fd = os.open(saved, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)

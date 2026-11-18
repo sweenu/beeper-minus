@@ -73,7 +73,7 @@ def make_app(beeper, db, transcriber, static_dir, save_token, hosts=("localhost"
 
     @routes.get("/api/config")
     async def config(request):
-        return web.json_response({"transcription": transcriber is not None})
+        return web.json_response({"transcription": transcriber is not None, "token": "Authorization" in beeper.http.headers})
 
     async def chat_info(chat_id):
         chat = await beeper.chat(chat_id)

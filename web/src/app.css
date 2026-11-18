@@ -127,3 +127,5 @@ dialog .actions { display: flex; justify-content: flex-end; gap: 8px; }
 .key { font: 1.05rem/1.5 ui-monospace, monospace; user-select: all; overflow-wrap: anywhere; background: var(--soft); padding: 12px; border-radius: 10px; }
 .emojis { font-size: 2rem; letter-spacing: 0.15em; text-align: center; }
 .setup .center { padding: 0; }
+.setup ul { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 8px; }
+.setup code { font-size: 0.9em; overflow-wrap: anywhere; }

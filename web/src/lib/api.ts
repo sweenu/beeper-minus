@@ -59,7 +59,7 @@ export async function api<T>(path: string, init?: { method?: string; body?: unkn
     try {
       message = JSON.parse(text).message ?? text
     } catch {}
-    throw new Error(message || `${r.status} ${r.statusText}`)
+    throw Object.assign(new Error(message || `${r.status} ${r.statusText}`), { status: r.status })
   }
   return text ? JSON.parse(text) : (undefined as T)
 }
@@ -82,4 +82,4 @@ export const unschedule = (id: number) => api(`/api/scheduled/${id}`, { method: 
 export const transcribe = (chatID: string, messageID: string) =>
   api<Transcription>('/api/transcriptions', { method: 'POST', body: { chatID, messageID } })
 
-export const config = api<{ transcription: boolean }>('/api/config').catch(() => ({ transcription: false }))
+export const config = api<{ transcription: boolean; token: boolean }>('/api/config').catch(() => ({ transcription: false, token: true }))

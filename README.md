@@ -86,6 +86,11 @@ screen that signs in with your email (or creates an account), then unlocks your 
 your recovery key or by comparing emojis with another of your devices. The token it gets is kept in
 `state_dir/beeper-token` (readable by the `beeper` user only), and Beeper Minus starts working right away.
 
+This only works while Beeper Server is signed out. If it was signed in before (with a token you made by
+hand, say), it refuses Beeper Minus until you either give that token in `beeper.token_file`, or reset
+Beeper Server by deleting its data folder (`/var/lib/beeper/server` with the NixOS module) while it's
+stopped. The web app explains this when it happens.
+
 No OAuth is involved: Beeper Server can't approve OAuth requests (approval is a button in Beeper Desktop's
 UI), but it accepts the account token its own sign-in returns as a read+write API token.
 
