@@ -10,12 +10,14 @@ from .db import now_ms, rows
 log = logging.getLogger(__name__)
 
 # The browser reaches Beeper only through these, never e.g. /v1/app (login) or /v1/bridges.
-PROXIED = ("/v1/accounts", "/v1/chats", "/v1/messages", "/v1/assets/serve")
+PROXIED = ("/v1/accounts", "/v1/chats", "/v1/messages", "/v1/assets/serve", "/v1/app/setup")
+# Replaces the account's recovery key, so only allowed while the account has none yet.
+RESET = "/v1/app/setup/verification/recovery-key/reset"
 PASS_REQ = ("Content-Type", "Range", "Accept-Encoding", "If-None-Match", "If-Modified-Since")
 PASS_RESP = ("Content-Type", "Content-Length", "Content-Encoding", "Content-Range", "Accept-Ranges", "ETag", "Last-Modified", "Cache-Control")
 
 
-def make_app(beeper, db, transcriber, static_dir):
+def make_app(beeper, db, transcriber, static_dir, save_token):
     routes = web.RouteTableDef()
 
     async def body(request, *required):
@@ -34,11 +36,26 @@ def make_app(beeper, db, transcriber, static_dir):
             raise web.HTTPBadRequest(text=f"invalid {key}")
         return v
 
+    @routes.post("/api/beeper/v1/app/setup/{step:response|register}")
+    async def sign_in(request):
+        data = await body(request)
+        async with beeper.http.post(f"{beeper.url}/v1/app/setup/{request.match_info['step']}", json=data) as r:
+            if r.status >= 400 or r.content_type != "application/json":
+                return web.Response(status=r.status, body=await r.read(), content_type=r.content_type)
+            result = await r.json()
+        # Beeper returns the account token once; keep it server-side, the browser never needs it.
+        token = (result.get("matrix") or {}).pop("accessToken", None)
+        if token:
+            save_token(token)
+        return web.json_response(result)
+
     @routes.route("*", "/api/beeper/{tail:.*}")
     async def proxy(request):
         path = request.raw_path[len("/api/beeper"):]
         if not path.startswith(PROXIED) or ".." in urllib.parse.unquote(path):
             raise web.HTTPForbidden()
+        if path.startswith(RESET) and (await beeper.call("GET", "/v1/app/setup"))["state"] != "needs-cross-signing-setup":
+            raise web.HTTPForbidden(text="the recovery key can only be created while setting up encryption")
         headers = {k: request.headers[k] for k in PASS_REQ if k in request.headers}
         data = await request.read() if request.can_read_body else None
         async with beeper.raw.request(request.method, URL(beeper.url + path, encoded=True), headers=headers, data=data) as r:

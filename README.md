@@ -18,9 +18,10 @@ One Python process (aiohttp):
 
 - listens to Beeper's WebSocket for new voice notes (automatic transcription),
 - runs a 15-second scheduler for snoozes and scheduled messages (state in SQLite),
-- optionally serves the web app (Svelte + TypeScript, phone friendly) and a small API. The browser never
+- optionally serves the web app (Svelte + TypeScript, phone friendly, with a setup screen that signs Beeper
+  Server in) and a small API. The browser never
   sees the Beeper token: the backend proxies a whitelist of Beeper endpoints (`/v1/accounts`, `/v1/chats`,
-  `/v1/messages`, `/v1/assets/serve`) and adds it.
+  `/v1/messages`, `/v1/assets/serve`, `/v1/app/setup`) and adds it.
 
 All configuration lives in a TOML file: see [`config.example.toml`](config.example.toml). Turn the web app off
 for a headless "transcribe into Note to self" setup.
@@ -46,7 +47,8 @@ for a headless "transcribe into Note to self" setup.
             enable = true;
             whisperPackage = pkgs.whisper-cpp-vulkan; # GPU; add "render" to SupplementaryGroups
             settings = {
-              beeper.token_file = "/run/secrets/beeper-token"; # readable by the `beeper` user
+              # Optional: without it, sign in from the web app's setup screen.
+              # beeper.token_file = "/run/secrets/beeper-token"; # readable by the `beeper` user
               transcription = {
                 engine = "whisper-cpp";
                 auto = true;
@@ -73,9 +75,15 @@ Both run as the `beeper` user.
 
 ### First-time Beeper Server setup
 
-You don't need OAuth. Beeper Server can't approve OAuth requests (approval is a button in Beeper Desktop's
-UI), but it accepts the Beeper account access token that its own sign-in flow returns as a read+write API
-token. The sign-in endpoints work without a token:
+Leave `beeper.token_file` unset and open the web app: while Beeper Server isn't signed in, it shows a setup
+screen that signs in with your email (or creates an account), then unlocks your encrypted messages with
+your recovery key or by comparing emojis with another of your devices. The token it gets is kept in
+`state_dir/beeper-token` (readable by the `beeper` user only), and Beeper Minus starts working right away.
+
+No OAuth is involved: Beeper Server can't approve OAuth requests (approval is a button in Beeper Desktop's
+UI), but it accepts the account token its own sign-in returns as a read+write API token.
+
+Headless, without the web app, sign in by hand and save the token as `beeper.token_file`:
 
 ```sh
 api=http://127.0.0.1:23373
@@ -83,14 +91,7 @@ curl -X POST $api/v1/app/setup/start                      # -> setupRequestID
 curl -X POST $api/v1/app/setup/email -H 'Content-Type: application/json' \
   -d '{"setupRequestID": "…", "email": "you@example.com"}'
 curl -X POST $api/v1/app/setup/response -H 'Content-Type: application/json' \
-  -d '{"setupRequestID": "…", "response": "<code from the email>"}'
-```
-
-The last response contains `matrix.accessToken`, **returned only once**: save it as `beeper.token_file`.
-Then let this device decrypt your messages, for example with your recovery key:
-
-```sh
-curl -H "Authorization: Bearer $token" $api/v1/app/setup          # state: needs-verification, …, ready
+  -d '{"setupRequestID": "…", "response": "<code from the email>"}'   # -> matrix.accessToken, shown once
 curl -X POST $api/v1/app/setup/verification/recovery-key -H "Authorization: Bearer $token" \
   -H 'Content-Type: application/json' -d '{"recoveryKey": "…"}'
 ```

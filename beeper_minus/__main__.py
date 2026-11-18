@@ -12,21 +12,39 @@ from .transcribe import Transcriber
 
 
 async def run(cfg):
-    b = cfg.get("beeper", {})
-    beeper = Beeper(b.get("url", "http://127.0.0.1:23373"), Path(b["token_file"]).read_text().strip())
+    b, w = cfg.get("beeper", {}), cfg.get("web", {})
     state_dir = Path(cfg.get("state_dir") or os.environ.get("STATE_DIRECTORY") or ".")
     db = open_db(state_dir / "beeper-minus.db")
+    # Without a configured token, the web app's setup screen signs Beeper Server in and saves one here.
+    saved = state_dir / "beeper-token"
+    token = Path(b["token_file"]).read_text().strip() if b.get("token_file") else saved.exists() and saved.read_text().strip()
+    if not token and not w.get("enable", True):
+        sys.exit("No Beeper token: set beeper.token_file, or enable the web app to sign in from its setup screen.")
+    beeper = Beeper(b.get("url", "http://127.0.0.1:23373"), token)
+    signed_in = asyncio.Event()
+    if token:
+        signed_in.set()
+
+    def save_token(token):
+        fd = os.open(saved, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as f:
+            f.write(token)
+        beeper.set_token(token)
+        signed_in.set()
+
+    async def after_sign_in(task):
+        await signed_in.wait()
+        await task
 
     t = cfg.get("transcription", {})
     transcriber = Transcriber(t, beeper, db) if t.get("engine") else None
 
-    tasks = [scheduler.run(beeper, db)]
+    tasks = [after_sign_in(scheduler.run(beeper, db))]
     if transcriber and t.get("auto", False):
-        tasks.append(transcriber.run())
-    w = cfg.get("web", {})
+        tasks.append(after_sign_in(transcriber.run()))
     if w.get("enable", True):
         static = os.environ.get("BEEPER_MINUS_STATIC") or w.get("static_dir") or Path(__file__).parent.parent / "web" / "dist"
-        app = web.make_app(beeper, db, transcriber, static)
+        app = web.make_app(beeper, db, transcriber, static, save_token)
         await web.serve(app, w.get("host", "127.0.0.1"), w.get("port", 8099))
     await asyncio.gather(*tasks)
 

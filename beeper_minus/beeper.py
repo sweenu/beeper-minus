@@ -6,12 +6,17 @@ import aiohttp
 class Beeper:
     """Minimal client for the Beeper Client API served by Beeper Server/Desktop."""
 
-    def __init__(self, url, token):
+    def __init__(self, url, token=None):
         self.url = url.rstrip("/")
-        headers = {"Authorization": f"Bearer {token}"}
-        self.http = aiohttp.ClientSession(headers=headers, timeout=aiohttp.ClientTimeout(total=60))
+        self.http = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60))
         # The web proxy passes bodies through untouched, compressed or not.
-        self.raw = aiohttp.ClientSession(headers=headers, auto_decompress=False, timeout=aiohttp.ClientTimeout(total=None, sock_connect=30))
+        self.raw = aiohttp.ClientSession(auto_decompress=False, timeout=aiohttp.ClientTimeout(total=None, sock_connect=30))
+        if token:
+            self.set_token(token)
+
+    def set_token(self, token):
+        for session in (self.http, self.raw):
+            session.headers["Authorization"] = f"Bearer {token}"
 
     async def call(self, method, path, body=None, **query):
         url = self.url + urllib.parse.quote(path)

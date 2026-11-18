@@ -40,7 +40,7 @@ async def main():
     static = tmp / "static"
     static.mkdir()
     (static / "index.html").write_text("<h1>hi</h1>")
-    runner = web.AppRunner(bm_web.make_app(beeper, db, transcriber, static))
+    runner = web.AppRunner(bm_web.make_app(beeper, db, transcriber, static, None))
     await runner.setup()
     await web.TCPSite(runner, "127.0.0.1", 23398).start()
     api = "http://127.0.0.1:23398"
@@ -53,7 +53,7 @@ async def main():
             assert r.status == 200 and all(not c["isArchived"] for c in (await r.json())["items"])
         async with http.get(f"{api}/api/beeper/v1/chats/%21alice%3Abeeper.com/messages") as r:
             assert r.status == 200, r.status
-        for bad in ("/api/beeper/v1/app/setup", "/api/beeper/v1/chats/../app/setup", "/api/beeper/v1/chats/%2e%2e/app"):
+        for bad in ("/api/beeper/v1/bridges", "/api/beeper/v1/chats/../bridges", "/api/beeper/v1/chats/%2e%2e/bridges"):
             async with http.get(api + bad) as r:
                 assert r.status == 403, (bad, r.status)
         async with http.get(f"{api}/") as r:
@@ -119,7 +119,61 @@ async def main():
     await beeper.close()
     await runner.cleanup()
     await fake_runner.cleanup()
+    await setup_flow(static)
     print("ok")
+
+
+async def setup_flow(static):
+    """A signed-out Beeper Server gets signed in from the web app, which keeps the token."""
+    for code, steps in (("123456", ["response"]), (fake_beeper.NEW_ACCOUNT_CODE, ["response", "register"])):
+        fake = fake_beeper.make_app("needs-login")
+        fake_runner = web.AppRunner(fake)
+        await fake_runner.setup()
+        await web.TCPSite(fake_runner, "127.0.0.1", 23397).start()
+        beeper = Beeper("http://127.0.0.1:23397")
+        saved = []
+
+        def save(token):
+            saved.append(token)
+            beeper.set_token(token)
+
+        db = open_db(":memory:")
+        runner = web.AppRunner(bm_web.make_app(beeper, db, None, static, save))
+        await runner.setup()
+        await web.TCPSite(runner, "127.0.0.1", 23396).start()
+        api = "http://127.0.0.1:23396/api/beeper/v1/app/setup"
+        async with ClientSession() as http:
+            async with http.get(api) as r:
+                assert (await r.json())["state"] == "needs-login"
+            async with http.post(f"{api}/start") as r:
+                rid = (await r.json())["setupRequestID"]
+            async with http.post(f"{api}/email", json={"setupRequestID": rid, "email": "me@example.com"}) as r:
+                assert r.status == 204, r.status
+            async with http.post(f"{api}/response", json={"setupRequestID": rid, "response": code}) as r:
+                result = await r.json()
+            if "register" in steps:
+                assert result["registrationRequired"] and not saved
+                async with http.post(f"{api}/register", json={"setupRequestID": rid, "leadToken": result["leadToken"], "username": "me42", "acceptTerms": True}) as r:
+                    result = await r.json()
+            assert saved == [fake_beeper.TOKEN] and "accessToken" not in result["matrix"], result
+            async with http.get(api) as r:
+                state = (await r.json())["state"]
+            # Only a brand new account may create a recovery key; the token is now sent along.
+            async with http.post(f"{api}/verification/recovery-key/reset", json={}) as r:
+                assert r.status == (200 if state == "needs-cross-signing-setup" else 403), (state, r.status)
+            if state == "needs-verification":
+                async with http.post(f"{api}/verification/recovery-key", json={"recoveryKey": "wrong"}) as r:
+                    assert r.status == 400
+                async with http.post(f"{api}/verification/recovery-key", json={"recoveryKey": fake_beeper.RECOVERY_KEY}) as r:
+                    assert r.status == 200
+            else:
+                async with http.post(f"{api}/verification/recovery-key/reset/confirm", json={"recoveryKey": fake_beeper.RECOVERY_KEY}) as r:
+                    assert r.status == 200
+            async with http.get(api) as r:
+                assert (await r.json())["state"] == "ready"
+        await beeper.close()
+        await runner.cleanup()
+        await fake_runner.cleanup()
 
 
 def test_end_to_end():

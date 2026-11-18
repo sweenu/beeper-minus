@@ -1,6 +1,7 @@
-"""A tiny stand-in for Beeper Server's Client API, for tests and UI work: python -m tests.fake_beeper"""
+"""A tiny stand-in for Beeper Server's Client API, for tests and UI work: python -m tests.fake_beeper [--setup]"""
 
 import asyncio
+import sys
 import copy
 import time
 from datetime import datetime, timedelta, timezone
@@ -63,17 +64,91 @@ def seed():
     return chats, messages
 
 
-def make_app():
+RECOVERY_KEY = "EsTc 1234 abcd"
+NEW_ACCOUNT_CODE = "000000"  # sign-in code that leads to account creation
+PUBLIC = ("/v1/app/setup", "/v1/app/setup/start", "/v1/app/setup/email", "/v1/app/setup/response", "/v1/app/setup/register")
+
+
+def make_app(state="ready"):
     app = web.Application()
     chats, messages = seed()
     app["chats"], app["messages"], app["sockets"] = chats, messages, []
+    # Sign-in and encryption setup, as GET /v1/app/setup reports it.
+    app["setup"] = {"state": state, "e2ee": {}, "verification": None}
     routes = web.RouteTableDef()
 
     @web.middleware
     async def auth(request, handler):
-        if request.headers.get("Authorization") != f"Bearer {TOKEN}":
+        public = request.path in PUBLIC and app["setup"]["state"] == "needs-login"
+        if not public and request.headers.get("Authorization") != f"Bearer {TOKEN}":
             raise web.HTTPUnauthorized()
         return await handler(request)
+
+    setup = app["setup"]
+
+    def session(next_state):
+        setup["state"] = next_state
+        return {"matrix": {"accessToken": TOKEN, "userID": "@me:beeper.com", "deviceID": "DEV", "homeserver": "https://matrix.beeper.com"}, "session": dict(setup)}
+
+    @routes.get("/v1/app/setup")
+    async def setup_state(request):
+        return web.json_response(setup)
+
+    @routes.post("/v1/app/setup/start")
+    async def setup_start(request):
+        return web.json_response({"setupRequestID": "req1", "signInMethods": ["email"]})
+
+    @routes.post("/v1/app/setup/email")
+    async def setup_email(request):
+        assert (await request.json())["setupRequestID"] == "req1"
+        return web.Response(status=204)
+
+    @routes.post("/v1/app/setup/response")
+    async def setup_response(request):
+        if (await request.json())["response"] == NEW_ACCOUNT_CODE:
+            return web.json_response({"registrationRequired": True, "leadToken": "lead", "setupRequestID": "req1", "usernameSuggestions": ["me42"], "copy": {}})
+        return web.json_response(session("needs-verification"))
+
+    @routes.post("/v1/app/setup/register")
+    async def setup_register(request):
+        body = await request.json()
+        assert body["acceptTerms"] is True and body["leadToken"] == "lead" and body["username"]
+        return web.json_response(session("needs-cross-signing-setup"))
+
+    @routes.post("/v1/app/setup/verification/recovery-key")
+    async def recovery_key(request):
+        if (await request.json())["recoveryKey"] != RECOVERY_KEY:
+            return web.json_response({"message": "The recovery key is invalid", "code": "invalid_recovery_code"}, status=400)
+        setup["state"] = "ready"
+        return web.json_response({"session": setup})
+
+    @routes.post("/v1/app/setup/verification/recovery-key/reset")
+    async def reset(request):
+        return web.json_response({"recoveryKey": RECOVERY_KEY, "session": setup})
+
+    @routes.post("/v1/app/setup/verification/recovery-key/reset/confirm")
+    async def reset_confirm(request):
+        assert (await request.json())["recoveryKey"] == RECOVERY_KEY
+        setup["state"] = "ready"
+        return web.json_response({"session": setup})
+
+    @routes.post("/v1/app/setup/verifications")
+    async def verify_start(request):
+        # The other device "accepts" straight away.
+        setup["verification"] = {"id": "v1", "state": "ready", "direction": "outgoing", "methods": ["sas"], "purpose": "login", "availableActions": ["cancel", "sas.start"], "otherDevice": {"id": "PHONE", "name": "Beeper on iPhone"}}
+        return web.json_response(setup["verification"])
+
+    @routes.post("/v1/app/setup/verifications/{id}/{action:sas/start|sas/confirm|cancel}")
+    async def verify_action(request):
+        v, action = setup["verification"], request.match_info["action"]
+        if action == "sas/start":
+            v.update(state="sas_ready", availableActions=["sas.confirm", "cancel"], sas={"emojis": "🐶 🔑 🎸 🌵 🚀 ☂️ 🍕", "decimals": "1234 5678 9012"})
+        elif action == "sas/confirm":
+            v.update(state="done", availableActions=[])
+            setup["state"] = "ready"
+        else:
+            v.update(state="cancelled", availableActions=[], error={"code": "user", "reason": "Cancelled"})
+        return web.json_response(v)
 
     def find(chat_id):
         if chat_id not in chats:
@@ -156,4 +231,5 @@ async def push(app, msg):
 
 
 if __name__ == "__main__":
-    web.run_app(make_app(), host="127.0.0.1", port=23373)
+    # --setup starts signed out, to try the web app's setup screen.
+    web.run_app(make_app("needs-login" if "--setup" in sys.argv else "ready"), host="127.0.0.1", port=23373)

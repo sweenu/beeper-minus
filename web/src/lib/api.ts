@@ -53,8 +53,15 @@ export async function api<T>(path: string, init?: { method?: string; body?: unkn
     headers: init?.body === undefined ? {} : { 'Content-Type': 'application/json' },
     body: init?.body === undefined ? undefined : JSON.stringify(init.body),
   })
-  if (!r.ok) throw new Error((await r.text()) || `${r.status} ${r.statusText}`)
-  return r.json()
+  const text = await r.text()
+  if (!r.ok) {
+    let message = text
+    try {
+      message = JSON.parse(text).message ?? text
+    } catch {}
+    throw new Error(message || `${r.status} ${r.statusText}`)
+  }
+  return text ? JSON.parse(text) : (undefined as T)
 }
 
 export const beeper = <T>(path: string, query: Record<string, string | number | undefined> = {}) => {

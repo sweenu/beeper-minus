@@ -1,5 +1,5 @@
 # Beeper Minus configuration. Run with: beeper-minus config.toml
-# Everything is optional except beeper.token_file.
+# Everything is optional.
 
 # Where the SQLite database lives. Defaults to $STATE_DIRECTORY (systemd), else the working directory.
 # state_dir = "/var/lib/beeper-minus"
@@ -7,8 +7,9 @@
 [beeper]
 # Beeper Client API, served by Beeper Server (headless) or Beeper Desktop.
 url = "http://127.0.0.1:23373"
-# File holding a read+write Beeper Client API token.
-token_file = "/run/secrets/beeper-token"
+# File holding a read+write Beeper Client API token. Leave it unset to sign Beeper Server in from the
+# web app's setup screen instead: the token it gets is kept in state_dir/beeper-token.
+# token_file = "/run/secrets/beeper-token"
 
 [web]
 # Set to false to run headless (e.g. only transcribe voice notes into Note to self).

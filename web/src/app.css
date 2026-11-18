@@ -117,3 +117,13 @@ dialog label { display: flex; flex-direction: column; gap: 4px; color: var(--mut
 .presets button { display: flex; flex-direction: column; align-items: flex-start; text-align: left; }
 .presets button.active { border-color: var(--accent); outline: 1px solid var(--accent); }
 dialog .actions { display: flex; justify-content: flex-end; gap: 8px; }
+
+.setup { max-width: 440px; display: flex; flex-direction: column; gap: 12px; padding-top: 24px; }
+.setup form { display: flex; flex-direction: column; gap: 12px; }
+.setup label { display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: 0.9rem; }
+.setup input { width: 100%; color: var(--fg); }
+.setup .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.setup .link { align-self: flex-start; }
+.key { font: 1.05rem/1.5 ui-monospace, monospace; user-select: all; overflow-wrap: anywhere; background: var(--soft); padding: 12px; border-radius: 10px; }
+.emojis { font-size: 2rem; letter-spacing: 0.15em; text-align: center; }
+.setup .center { padding: 0; }
