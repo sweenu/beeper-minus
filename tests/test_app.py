@@ -56,8 +56,7 @@ async def main():
         async with http.get(f"{api}/api/beeper/v1/chats/%21alice%3Abeeper.com/messages") as r:
             assert r.status == 200, r.status
         for bad in ("/api/beeper/v1/info", "/api/beeper/v1/chats/../info", "/api/beeper/v1/chats/%2e%2e/info",
-                    "/api/beeper/v1/bridges/local-whatsapp/logins", "/api/beeper/v1/bridges/local-whatsapp/LOGINS/x/remove",
-                    "/api/beeper/v1/bridges/local-whatsapp/%6Cogins/x/remove"):
+                    ):
             async with http.get(api + bad) as r:
                 assert r.status == 403, (bad, r.status)
         async with http.get(f"{api}/", headers={"If-Modified-Since": "Thu, 01 Jan 1970 00:00:01 GMT"}) as r:
@@ -73,6 +72,18 @@ async def main():
         # Files people send you are served from this origin, so they must never run as the app.
         async with http.get(f"{api}/api/beeper/v1/assets/serve", params={"url": "mxc://local/x"}) as r:
             assert r.status == 200 and r.headers["Content-Security-Policy"] == "sandbox", r.headers
+
+        # Logins can be listed, never removed.
+        async with http.get(f"{api}/api/beeper/v1/bridges/local-signal/logins") as r:
+            assert r.status == 200 and (await r.json())["items"][0]["loginID"] == "signal-login", r.status
+        for bad in ("logins/signal-login/remove", "LOGINS/signal-login/remove", "%6Cogins/signal-login/remove"):
+            async with http.post(f"{api}/api/beeper/v1/bridges/local-signal/{bad}", json={"scope": "all-devices"}) as r:
+                assert r.status == 403, (bad, r.status)
+        # At the account limit, a new account is refused, but this server can join the existing login.
+        async with http.post(f"{api}/api/beeper/v1/bridges/local-signal/login-sessions", json={}) as r:
+            assert r.status == 409, r.status
+        async with http.post(f"{api}/api/beeper/v1/bridges/local-signal/login-sessions", json={"loginID": "signal-login"}) as r:
+            assert r.status == 200 and (await r.json())["currentStep"]["display"]["type"] == "qr"
 
         # Linking an on-device network: each step answered through the proxy, the wait step held open.
         wa = f"{api}/api/beeper/v1/bridges/local-whatsapp/login-sessions"

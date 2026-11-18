@@ -183,7 +183,7 @@ def make_app(state="ready"):
         bridge("local-whatsapp", "WhatsApp", "local", {"qr": ("QR code", qr), "phone": ("Pairing code", phone)}),
         bridge("local-linkedin", "LinkedIn", "local", {"cookies": ("Browser cookies", cookies)}),
         # Signal is still registered to another device; Telegram already works from Beeper Cloud.
-        bridge("local-signal", "Signal", "local", {}) | {"status": "limit_reached"},
+        bridge("local-signal", "Signal", "local", {"qr": ("QR code", qr)}) | {"status": "limit_reached"},
         telegram,
         bridge("local-telegram", "Telegram", "local", {}) | {"status": "limit_reached"},
         discord,
@@ -200,6 +200,14 @@ def make_app(state="ready"):
     @routes.get("/v1/bridges")
     async def list_bridges(request):
         return web.json_response({"items": [public(b) for b in bridges.values()]})
+
+    # Logins of your account on any device: Signal is set up on your phone, not here.
+    logins = {"local-signal": [{"loginID": "signal-login", "bridgeID": "local-signal", "status": "connected", "removeScopes": ["current-device", "all-devices"],
+                                "user": {"id": "me", "fullName": "Me", "phoneNumber": "+33600000000"}}]}
+
+    @routes.get("/v1/bridges/{id}/logins")
+    async def list_logins(request):
+        return web.json_response({"items": logins.get(request.match_info["id"], [])})
 
     @routes.get("/v1/bridges/{id}/login-flows")
     async def login_flows(request):
@@ -219,12 +227,16 @@ def make_app(state="ready"):
             return
         b = bridges[sess["bridgeID"]]
         b["accounts"] = [a for a in b["accounts"] if a["accountID"] != f"{b['id']}_me"] + [account(b)]
+        b["status"] = "connected"
         sess.update(status="complete", account=b["accounts"][-1])
 
     @routes.post("/v1/bridges/{id}/login-sessions")
     async def login_start(request):
         b = bridges[request.match_info["id"]]
         body = await request.json() if request.can_read_body else {}
+        # Like Beeper: the plan's limit only applies to new logins, not to joining an existing one.
+        if b["status"] == "limit_reached" and body.get("loginID") not in [x["loginID"] for x in logins.get(b["id"], [])]:
+            return web.json_response({"message": "Your plan's account limit for this network has been reached", "code": "ACCOUNT_LIMIT_REACHED"}, status=409)
         flow = body.get("flowID") or next(iter(b["flows"]))
         sess = {"bridgeID": b["id"], "loginSessionID": f"ls{len(sessions) + 1}", "accountID": body.get("accountID"), "steps": [dict(x) for x in b["flows"][flow][1]]}
         sessions[sess["loginSessionID"]] = sess

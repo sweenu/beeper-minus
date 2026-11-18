@@ -1,17 +1,19 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { renderSVG } from 'uqr'
-  import { api, beeper, WORKING, type Account, type Bridge, type LoginSession } from '../lib/api'
+  import { api, beeper, WORKING, type Account, type Bridge, type BridgeLogin, type LoginSession } from '../lib/api'
   import Icon from '../lib/Icon.svelte'
 
   interface Linking {
     bridge: Bridge
     account?: Account
+    loginID?: string // an existing login (from another device) this server joins
     flows?: { id: string; name?: string; description?: string }[] // sign-in methods to pick from
     session?: LoginSession
   }
 
   let bridges = $state<Bridge[] | null>(null)
+  let logins = $state<Record<string, BridgeLogin[]>>({})
   let linking = $state<Linking | null>(null)
   let fields = $state<Record<string, string>>({})
   let busy = $state(false)
@@ -29,17 +31,28 @@
   )
   const step = $derived(linking?.session?.currentStep)
 
-  const load = () => beeper<{ items: Bridge[] }>('/bridges').then((r) => (bridges = r.items), (e) => (error = e.message))
+  async function load() {
+    try {
+      bridges = (await beeper<{ items: Bridge[] }>('/bridges')).items
+      // At the plan's limit, the account already has a login for that network, likely on another device:
+      // this server can join it instead of adding a new one.
+      for (const b of bridges.filter((b) => b.status === 'limit_reached' && !b.accounts.length)) {
+        beeper<{ items: BridgeLogin[] }>(`/bridges/${enc(b.id)}/logins`).then((r) => (logins = { ...logins, [b.id]: r.items }), () => {})
+      }
+    } catch (e) {
+      error = (e as Error).message
+    }
+  }
   onMount(load)
 
-  const who = (a: Account) => a.user?.fullName || a.user?.username || a.user?.phoneNumber || a.user?.email || a.accountID
+  const who = (a: { user?: Account['user'] }) => a.user?.fullName || a.user?.username || a.user?.phoneNumber || a.user?.email || 'your account'
   const status = (a: Account) => a.statusText || a.status.replaceAll('_', ' ')
 
-  async function start(bridge: Bridge, account?: Account) {
+  async function start(bridge: Bridge, account?: Account, loginID?: string) {
     error = ''
     try {
       const flows = (await api<{ items: NonNullable<Linking['flows']> }>(`${base(bridge.id)}/login-flows`)).items
-      linking = { bridge, account, flows: flows.length > 1 ? flows : undefined }
+      linking = { bridge, account, loginID, flows: flows.length > 1 ? flows : undefined }
       if (flows.length <= 1) begin(flows[0]?.id)
     } catch (e) {
       error = (e as Error).message
@@ -49,7 +62,7 @@
   function begin(flowID?: string) {
     const l = linking!
     l.flows = undefined
-    run(() => api(`${base(l.bridge.id)}/login-sessions`, { method: 'POST', body: { flowID, accountID: l.account?.accountID, loginID: l.account?.loginID } }))
+    run(() => api(`${base(l.bridge.id)}/login-sessions`, { method: 'POST', body: { flowID, accountID: l.account?.accountID, loginID: l.account?.loginID ?? l.loginID } }))
   }
 
   // Each answer is the session's next state. A wait step (QR code, pairing code) is answered by
@@ -114,7 +127,7 @@
 
 {#if linking}
   <section class="card linking" aria-live="polite">
-    <h2>{linking.account ? 'Reconnect' : 'Connect'} {linking.bridge.displayName}</h2>
+    <h2>{linking.account ? 'Reconnect' : linking.loginID ? 'Add this server to' : 'Connect'} {linking.bridge.displayName}</h2>
     {#if linking.flows}
       <p>How do you want to sign in?</p>
       {#each linking.flows as f (f.id)}
@@ -124,7 +137,7 @@
       <p class="muted">Starting…</p>
     {:else if linking.session.status === 'failed'}
       <p class="error">{linking.session.error?.message ?? 'Signing in failed.'}</p>
-      <button onclick={() => start(linking!.bridge, linking!.account)}>Try again</button>
+      <button onclick={() => start(linking!.bridge, linking!.account, linking!.loginID)}>Try again</button>
     {:else if step}
       {#if step.instructions}<p>{step.instructions}</p>{/if}
       {#if step.type === 'display_and_wait'}
@@ -178,15 +191,23 @@
       <li class="card account">
         <div class="line">
           <strong>{b.displayName}</strong>
-          <span class:muted={b.status !== 'limit_reached'} class:error={b.status === 'limit_reached'}>
-            {b.status === 'limit_reached' ? 'account limit reached' : 'not connected'}
-          </span>
+          {#if b.status === 'limit_reached' && !logins[b.id]?.length}
+            <span class="error">account limit reached</span>
+          {:else}
+            <span class="muted">{b.status === 'limit_reached' ? 'on another device' : 'not connected'}</span>
+          {/if}
         </div>
         <div class="line">
           <span class="meta">on this server</span>
           {#if b.status === 'available'}<button disabled={!!linking} onclick={() => start(b)}>Connect</button>{/if}
         </div>
-        {#if b.status === 'limit_reached'}
+        {#each logins[b.id] ?? [] as l (l.loginID)}
+          <div class="line">
+            <span class="meta">Already set up on another device for {who(l)}.</span>
+            <button disabled={!!linking} onclick={() => start(b, undefined, l.loginID)}>Add to this server</button>
+          </div>
+        {/each}
+        {#if b.status === 'limit_reached' && !logins[b.id]?.length}
           <p class="meta">
             Your Beeper account already has a {b.displayName} account, maybe linked on another device (like a Beeper Server you
             reset), and your plan allows no more. Remove that one in Beeper's settings on your phone or computer, then reload this

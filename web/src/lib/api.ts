@@ -57,6 +57,13 @@ export interface Bridge {
   accounts: Account[]
 }
 
+// A network login of your Beeper account, on any of your devices.
+export interface BridgeLogin {
+  loginID: string
+  status: string
+  user?: Account['user']
+}
+
 export interface LoginField { id: string; label?: string; name?: string; type?: string; placeholder?: string; optional?: boolean; initialValue?: string }
 
 export type LoginStep = { stepID: string; instructions?: string } & (

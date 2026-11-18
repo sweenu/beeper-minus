@@ -12,7 +12,8 @@ log = logging.getLogger(__name__)
 
 # The browser reaches Beeper only through these, never e.g. /v1/app (login) or /v1/bridges.
 PROXIED = ("/v1/accounts", "/v1/chats", "/v1/messages", "/v1/assets/serve", "/v1/app/setup", "/v1/bridges")
-# Connecting a network goes through login sessions; .../logins can remove one from your account.
+# Connecting a network goes through login sessions. Logins may be listed (to add one to this server),
+# but nothing else: .../logins/{id}/remove takes a network off your account.
 LOGINS = "/logins"
 # Replaces the account's recovery key, so only allowed while the account has none yet.
 RESET = "/v1/app/setup/verification/recovery-key/reset"
@@ -56,7 +57,7 @@ def make_app(beeper, db, transcriber, static_dir, save_token, hosts=("localhost"
     async def proxy(request):
         path = request.raw_path[len("/api/beeper"):]
         plain = urllib.parse.unquote(path).lower()
-        if not path.startswith(PROXIED) or ".." in plain or (plain.startswith("/v1/bridges") and LOGINS in plain.split("?")[0]):
+        if not path.startswith(PROXIED) or ".." in plain or (plain.startswith("/v1/bridges") and LOGINS in plain.split("?")[0] and request.method != "GET"):
             raise web.HTTPForbidden()
         # Beeper may match routes case-insensitively or decoded, so compare the same way.
         if RESET in urllib.parse.unquote(path).lower() and (await beeper.call("GET", "/v1/app/setup"))["state"] != "needs-cross-signing-setup":

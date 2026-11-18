@@ -21,7 +21,7 @@ One Python process (aiohttp):
 - optionally serves the web app (Svelte + TypeScript, phone friendly, with a setup screen that signs Beeper
   Server in) and a small API. The browser never
   sees the Beeper token: the backend proxies a whitelist of Beeper endpoints (`/v1/accounts`, `/v1/chats`,
-  `/v1/messages`, `/v1/assets/serve`, `/v1/app/setup`, `/v1/bridges` without its `logins`) and adds it.
+  `/v1/messages`, `/v1/assets/serve`, `/v1/app/setup`, `/v1/bridges`, where logins can be listed but not removed) and adds it.
 
 All configuration lives in a TOML file: see [`config.example.toml`](config.example.toml). Turn the web app off
 for a headless "transcribe into Note to self" setup.
@@ -115,7 +115,8 @@ The Accounts page (top right of the inbox) lists your networks and whether they 
 in Beeper Cloud are connected from Beeper on your phone or computer, and the server picks them up. Networks
 that run on this server (on-device ones, like WhatsApp) live in Beeper Server's data folder: link them from
 the Accounts page, with a QR code, a pairing code or a form, as each network asks. Resetting Beeper Server
-unlinks them.
+unlinks them. On Beeper's free plan a network counts once per account: if it's already set up on your phone
+or computer, the page offers to add this server to that same login rather than a new one.
 
 ## Development
 
