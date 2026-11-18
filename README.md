@@ -1,0 +1,88 @@
+# Beeper Minus
+
+A small, self-hosted sidecar for [Beeper](https://www.beeper.com) that brings three Beeper Plus features to
+your own server:
+
+- **Voice note transcription**: local [whisper.cpp](https://github.com/ggml-org/whisper.cpp) or any
+  OpenAI-compatible speech-to-text API. Automatic or on demand, shown under the audio in the web app and
+  optionally posted to your *Note to self*.
+- **Snooze**: archives a chat and unarchives it at the time you pick.
+- **Send later**: schedule a message from the chat list or from inside a conversation; edit or unschedule it.
+
+It talks to the Beeper Client API served by **Beeper Server** (headless) or Beeper Desktop. It is not a
+Beeper client replacement: the web app only shows your chats and these three features.
+
+## How it works
+
+One Python process (aiohttp):
+
+- listens to Beeper's WebSocket for new voice notes (automatic transcription),
+- runs a 15-second scheduler for snoozes and scheduled messages (state in SQLite),
+- optionally serves the web app (Svelte + TypeScript, phone friendly) and a small API. The browser never
+  sees the Beeper token: the backend proxies a whitelist of Beeper endpoints (`/v1/accounts`, `/v1/chats`,
+  `/v1/messages`, `/v1/assets/serve`) and adds it.
+
+All configuration lives in a TOML file: see [`config.example.toml`](config.example.toml). Turn the web app off
+for a headless "transcribe into Note to self" setup.
+
+> [!WARNING]
+> The web app has no authentication and can read and send your messages. It listens on localhost by default;
+> expose it only behind an authenticating reverse proxy (or a private network like Tailscale).
+
+## NixOS
+
+```nix
+{
+  inputs.beeper-minus.url = "github:sweenu/beeper-minus";
+
+  outputs = { nixpkgs, beeper-minus, ... }: {
+    nixosConfigurations.server = nixpkgs.lib.nixosSystem {
+      modules = [
+        beeper-minus.nixosModules.default
+        ({ pkgs, ... }: {
+          nixpkgs.config.allowUnfree = true; # Beeper Server
+          services.beeper-server.enable = true;
+          services.beeper-minus = {
+            enable = true;
+            whisperPackage = pkgs.whisper-cpp-vulkan; # GPU; add "render" to SupplementaryGroups
+            settings = {
+              beeper.token_file = "/run/secrets/beeper-token"; # readable by the `beeper` user
+              transcription = {
+                engine = "whisper-cpp";
+                auto = true;
+                notes_to_self_chat_id = "!abc:beeper.com";
+                whisper-cpp.model = pkgs.fetchurl {
+                  url = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin";
+                  hash = "sha256-H8cPd0046xaZk6w5Huo1fvR8iHV+9y7llDh5t+jivGk=";
+                };
+              };
+            };
+          };
+        })
+      ];
+    };
+  };
+}
+```
+
+- `services.beeper-server`: the headless Beeper client (`pkgs.beeper-server`, x86_64 only), on
+  `127.0.0.1:23373`, state in `/var/lib/beeper`. Log in once through `POST /v1/app/setup/*`.
+- `services.beeper-minus`: `settings` is the TOML config; `beeper.url` defaults to the local Beeper Server.
+
+Both run as the `beeper` user.
+
+### Getting a token
+
+Beeper Server can't approve OAuth requests (no UI). Register a read+write `bdapi_` token by hand: put its
+sha256 in `index.db` `key_values['conn:tokens']` with the server stopped. With Beeper Desktop, enable its
+Desktop API and create a token from its settings.
+
+## Development
+
+```sh
+nix develop                     # python + aiohttp, node, ffmpeg
+python -m tests.test_app        # end-to-end test against a fake Beeper
+python -m tests.fake_beeper &   # fake Beeper on :23373 with token "test-token"
+python -m beeper_minus config.toml
+cd web && npm install && npm run dev   # proxies /api to :8099
+```

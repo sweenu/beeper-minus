@@ -1,0 +1,44 @@
+# Beeper Minus configuration. Run with: beeper-minus config.toml
+# Everything is optional except beeper.token_file.
+
+# Where the SQLite database lives. Defaults to $STATE_DIRECTORY (systemd), else the working directory.
+# state_dir = "/var/lib/beeper-minus"
+
+[beeper]
+# Beeper Client API, served by Beeper Server (headless) or Beeper Desktop.
+url = "http://127.0.0.1:23373"
+# File holding a read+write Beeper Client API token.
+token_file = "/run/secrets/beeper-token"
+
+[web]
+# Set to false to run headless (e.g. only transcribe voice notes into Note to self).
+enable = true
+# No authentication is built in: keep it on localhost, or put an authenticating reverse proxy in front.
+host = "127.0.0.1"
+port = 8099
+
+# Snooze and send later need no configuration.
+
+[transcription]
+# "whisper-cpp" (local) or "openai" (any OpenAI-compatible speech-to-text API).
+# Leave unset to turn transcription off entirely.
+engine = "whisper-cpp"
+# Transcribe incoming voice notes as they arrive. Without it, transcribe on demand from the web app.
+auto = true
+# Also post every transcript to this chat (your "Note to self"); omit to keep them in the web app only.
+# notes_to_self_chat_id = "!abcdefghijklmnop:beeper.com"
+# Automatic mode ignores voice notes older than this (account linking backfills old history).
+max_age_days = 3
+
+[transcription.whisper-cpp]
+# A ggml model, e.g. https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin
+model = "/var/lib/models/ggml-large-v3-turbo.bin"
+# If the detected language isn't one of these, transcribe again forcing the first one.
+# languages = ["fr", "en"]
+# command = "whisper-cli"
+
+[transcription.openai]
+# url = "https://api.openai.com/v1/audio/transcriptions"   # or Groq, a local faster-whisper server...
+# model = "whisper-1"
+# api_key_file = "/run/secrets/openai-key"
+# language = "fr"   # optional hint

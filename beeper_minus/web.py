@@ -1,0 +1,174 @@
+import logging
+import urllib.parse
+from pathlib import Path
+
+from aiohttp import web
+from yarl import URL
+
+from .db import now_ms, rows
+
+log = logging.getLogger(__name__)
+
+# The browser reaches Beeper only through these, never e.g. /v1/app (login) or /v1/bridges.
+PROXIED = ("/v1/accounts", "/v1/chats", "/v1/messages", "/v1/assets/serve")
+PASS_REQ = ("Content-Type", "Range", "Accept-Encoding", "If-None-Match", "If-Modified-Since")
+PASS_RESP = ("Content-Type", "Content-Length", "Content-Encoding", "Content-Range", "Accept-Ranges", "ETag", "Last-Modified", "Cache-Control")
+
+
+def make_app(beeper, db, transcriber, static_dir):
+    routes = web.RouteTableDef()
+
+    async def body(request, *required):
+        try:
+            data = await request.json()
+        except ValueError:
+            raise web.HTTPBadRequest(text="invalid JSON")
+        if not isinstance(data, dict) or any(k not in data for k in required):
+            raise web.HTTPBadRequest(text=f"expected fields: {', '.join(required)}")
+        return data
+
+    def field(data, key, kind):
+        v = data[key]
+        # bool is an int subclass, so reject it explicitly.
+        if not isinstance(v, kind) or isinstance(v, bool) or (isinstance(v, str) and not v.strip()):
+            raise web.HTTPBadRequest(text=f"invalid {key}")
+        return v
+
+    @routes.route("*", "/api/beeper/{tail:.*}")
+    async def proxy(request):
+        path = request.raw_path[len("/api/beeper"):]
+        if not path.startswith(PROXIED) or ".." in urllib.parse.unquote(path):
+            raise web.HTTPForbidden()
+        headers = {k: request.headers[k] for k in PASS_REQ if k in request.headers}
+        data = await request.read() if request.can_read_body else None
+        async with beeper.raw.request(request.method, URL(beeper.url + path, encoded=True), headers=headers, data=data) as r:
+            resp = web.StreamResponse(status=r.status, headers={k: r.headers[k] for k in PASS_RESP if k in r.headers})
+            await resp.prepare(request)
+            async for chunk in r.content.iter_chunked(1 << 16):
+                await resp.write(chunk)
+            await resp.write_eof()
+            return resp
+
+    @routes.get("/api/config")
+    async def config(request):
+        return web.json_response({"transcription": transcriber is not None})
+
+    async def chat_info(chat_id):
+        chat = await beeper.chat(chat_id)
+        return chat.get("title"), chat.get("network")
+
+    # --- snooze ---
+
+    @routes.get("/api/snoozes")
+    async def list_snoozes(request):
+        return web.json_response(rows(db, "select * from snoozes order by until"))
+
+    @routes.post("/api/snoozes")
+    async def snooze(request):
+        data = await body(request, "chatID", "until")
+        chat_id, until = field(data, "chatID", str), field(data, "until", int)
+        title, network = await chat_info(chat_id)
+        await beeper.archive(chat_id, True)
+        db.execute("insert or replace into snoozes values (?, ?, ?, ?, ?)", (chat_id, title, network, until, now_ms()))
+        return web.json_response({"ok": True})
+
+    @routes.delete("/api/snoozes/{chat_id}")
+    async def unsnooze(request):
+        chat_id = request.match_info["chat_id"]
+        await beeper.archive(chat_id, False)
+        db.execute("delete from snoozes where chat_id = ?", (chat_id,))
+        return web.json_response({"ok": True})
+
+    # --- send later ---
+
+    @routes.get("/api/scheduled")
+    async def list_scheduled(request):
+        return web.json_response(rows(db, "select * from scheduled order by send_at"))
+
+    @routes.post("/api/scheduled")
+    async def schedule(request):
+        data = await body(request, "chatID", "text", "sendAt")
+        chat_id, text, send_at = field(data, "chatID", str), field(data, "text", str), field(data, "sendAt", int)
+        title, network = await chat_info(chat_id)
+        cur = db.execute(
+            "insert into scheduled (chat_id, chat_title, network, text, send_at, created_at) values (?, ?, ?, ?, ?, ?)",
+            (chat_id, title, network, text, send_at, now_ms()),
+        )
+        return web.json_response(rows(db, "select * from scheduled where id = ?", cur.lastrowid)[0])
+
+    @routes.patch("/api/scheduled/{id:\\d+}")
+    async def edit_scheduled(request):
+        data = await body(request)
+        sets = {}
+        if "text" in data:
+            sets["text"] = field(data, "text", str)
+        if "sendAt" in data:
+            sets["send_at"] = field(data, "sendAt", int)
+        # Editing is how a failed message gets retried.
+        cur = db.execute(
+            f"update scheduled set {''.join(f'{k} = ?, ' for k in sets)}error = null where id = ?",
+            (*sets.values(), int(request.match_info["id"])),
+        )
+        if not cur.rowcount:
+            raise web.HTTPNotFound()
+        return web.json_response(rows(db, "select * from scheduled where id = ?", int(request.match_info["id"]))[0])
+
+    @routes.delete("/api/scheduled/{id:\\d+}")
+    async def unschedule(request):
+        db.execute("delete from scheduled where id = ?", (int(request.match_info["id"]),))
+        return web.json_response({"ok": True})
+
+    # --- transcriptions ---
+
+    @routes.get("/api/transcriptions")
+    async def list_transcriptions(request):
+        chat_id = request.query.get("chatID")
+        if chat_id:
+            return web.json_response(rows(db, "select * from transcriptions where chat_id = ? order by sent_at", chat_id))
+        limit = min(int(request.query.get("limit", "50")), 500)
+        return web.json_response(rows(db, "select * from transcriptions order by created_at desc limit ?", limit))
+
+    @routes.post("/api/transcriptions")
+    async def transcribe(request):
+        if transcriber is None:
+            raise web.HTTPNotFound(text="transcription is not configured")
+        data = await body(request, "chatID", "messageID")
+        chat_id, message_id = field(data, "chatID", str), field(data, "messageID", str)
+        msg = await beeper.call("GET", f"/v1/chats/{chat_id}/messages/{message_id}")
+        try:
+            return web.json_response(await transcriber.transcribe(msg))
+        except ValueError as e:
+            raise web.HTTPBadRequest(text=str(e))
+
+    # --- web app ---
+
+    index = Path(static_dir) / "index.html"
+
+    @routes.get("/")
+    async def home(request):
+        return web.FileResponse(index)
+
+    app = web.Application(middlewares=[errors])
+    app.add_routes(routes)
+    app.router.add_static("/", static_dir)
+    return app
+
+
+@web.middleware
+async def errors(request, handler):
+    try:
+        return await handler(request)
+    except web.HTTPException:
+        raise
+    except Exception as e:
+        # Surface Beeper/engine failures to the web app instead of a bare 500.
+        log.warning("%s %s: %r", request.method, request.path, e)
+        status = getattr(e, "status", 502)
+        raise web.HTTPBadGateway(text=f"{status}: {getattr(e, 'message', None) or e!r}")
+
+
+async def serve(app, host, port):
+    runner = web.AppRunner(app)
+    await runner.setup()
+    await web.TCPSite(runner, host, port).start()
+    log.info("web app on http://%s:%d", host, port)
