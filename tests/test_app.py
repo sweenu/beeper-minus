@@ -275,6 +275,11 @@ def fake_beeper_mcp():
         return f"sent {text!r} to {chat_id}"
 
     @server.tool()
+    def list_messages(chat_id: str) -> str:
+        """Read a chat's messages."""
+        return "[]"
+
+    @server.tool()
     def read_chat(chat_id: str) -> str:  # Beeper adding a tool we already have
         return "Beeper's read_chat"
 
@@ -295,6 +300,9 @@ async def beeper_tools(static):
     async with Client("http://127.0.0.1:23393/mcp") as ai:
         tools = {t.name: t for t in (await ai.list_tools()).tools}
         assert {"send_message", "read_chat", "list_scheduled"} <= tools.keys() and "chat_id" in tools["send_message"].input_schema["properties"], tools
+        # Reading messages with Beeper's tool, the assistant learns where voice notes' text is.
+        assert tools["list_messages"].description.startswith("Read a chat's messages.") and "transcribe_message" in tools["list_messages"].description
+        assert "transcribe_message" not in (tools["send_message"].description or "")
         r = await ai.call_tool("send_message", {"chat_id": "!bob", "text": "hi"})
         assert not r.is_error and r.content[0].text == "sent 'hi' to !bob", r
         assert (await ai.call_tool("read_chat", {"chat_id": "!bob"})).content[0].text != "Beeper's read_chat"
