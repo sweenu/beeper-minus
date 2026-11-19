@@ -31,6 +31,7 @@ PROXIED = ("/v1/accounts", "/v1/chats", "/v1/messages", "/v1/assets/serve", "/v1
 LOGINS = "/logins"
 # Replaces the account's recovery key, so only allowed while the account has none yet.
 RESET = "/v1/app/setup/verification/recovery-key/reset"
+MCP_PATHS = ("/mcp", "/mcp/")
 PASS_REQ = ("Content-Type", "Range", "Accept-Encoding", "If-None-Match", "If-Modified-Since")
 PASS_RESP = ("Content-Type", "Content-Length", "Content-Encoding", "Content-Range", "Accept-Ranges", "ETag", "Last-Modified", "Cache-Control")
 
@@ -162,12 +163,17 @@ def make_app(beeper, db, transcriber, static_dir, save_token, hosts=("localhost"
         mcp_server = make_mcp(beeper, db, transcriber)
         # Host, user and origin checks are done by guard() below, for the whole app.
         mcp_app = mcp_server.streamable_http_app(stateless_http=True, transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False))
-        routes += mcp_app.routes
+        # Some clients add a trailing slash; without this route it would reach the static files (405).
+        routes += [Route(path, mcp_app.routes[0].endpoint) for path in MCP_PATHS]
 
         @contextlib.asynccontextmanager
         async def lifespan(app):
             async with mcp_server.session_manager.run():
                 yield
+    else:
+        async def mcp_off(request):
+            raise HTTPException(404, "MCP is off: set web.mcp = true")
+        routes += [Route(path, mcp_off, methods=["GET", "POST", "DELETE"]) for path in MCP_PATHS]
 
     routes.append(Mount("/", StaticFiles(directory=static_dir)))
     # Failures talking to Beeper or the transcription engine go to the web app, instead of a bare 500.
@@ -184,7 +190,7 @@ def refused(request, hosts, users, mcp_token=None):
     login = request.headers.get("Tailscale-User-Login", "").lower()
     if users and login not in users:
         return f"{login or 'this request'} is not in web.allowed_users (open it through tailscale serve)"
-    if mcp_token and request.url.path == "/mcp" and not hmac.compare_digest(request.headers.get("Authorization", "").encode(), f"Bearer {mcp_token}".encode()):
+    if mcp_token and request.url.path in MCP_PATHS and not hmac.compare_digest(request.headers.get("Authorization", "").encode(), f"Bearer {mcp_token}".encode()):
         return "wrong or missing MCP token (Authorization: Bearer ..., see web.mcp_token_file)"
     # Any website you visit can make your browser send it requests; only the app's own page may change things.
     if request.method not in ("GET", "HEAD", "OPTIONS"):

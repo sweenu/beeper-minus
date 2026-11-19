@@ -249,10 +249,17 @@ async def tailscale_users(static):
     stop = await serve(bm_web.make_app(None, open_db(":memory:"), None, static, None, mcp=True, mcp_token="s3cret"), 23395)
     async with ClientSession() as http:
         for headers, status in (({}, 403), ({"Authorization": "Bearer wrong"}, 403), ({"Authorization": "Bearer s3cret"}, None)):
-            async with http.post("http://127.0.0.1:23395/mcp", json={}, headers=headers) as r:
-                assert (r.status == 403) == (status == 403), (headers, r.status)
+            for path in ("/mcp", "/mcp/"):  # some clients add the slash
+                async with http.post(f"http://127.0.0.1:23395{path}", json={}, headers=headers) as r:
+                    assert (r.status == 403) == (status == 403) and r.status != 405, (headers, path, r.status)
         async with http.get("http://127.0.0.1:23395/api/scheduled") as r:
             assert r.status == 200
+    await stop()
+    # MCP off: say so, rather than a puzzling 405 from the static files.
+    stop = await serve(bm_web.make_app(None, open_db(":memory:"), None, static, None), 23395)
+    async with ClientSession() as http:
+        async with http.post("http://127.0.0.1:23395/mcp", json={}) as r:
+            assert r.status == 404 and "web.mcp = true" in await r.text(), r.status
     await stop()
 
 
