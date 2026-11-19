@@ -384,7 +384,7 @@ async def mcp_tools(api, db, fake, alice, beeper):
 
         tools = {t.name: t for t in (await ai.list_tools()).tools}
         assert tools.keys() == {"search_transcriptions", "transcribe_message", "list_scheduled", "schedule_message", "edit_scheduled", "unschedule",
-                                "get_new_messages", "get_reactions", "wait_for_message", "send_message", "list_messages", "search_messages"}, tools.keys()
+                                "get_reactions", "wait_for_message", "send_message", "list_messages", "search_messages"}, tools.keys()
         # Beeper's message tools keep Beeper's parameters and description, and are answered by us.
         assert tools["list_messages"].input_schema["required"] == ["chatID"] and tools["list_messages"].description.startswith("List messages")
         err, found = await call("search_transcriptions", query="bonjour")
@@ -407,25 +407,13 @@ async def mcp_tools(api, db, fake, alice, beeper):
         assert not (await call("unschedule", id=m["id"]))[0] and (await call("unschedule", id=m["id"]))[0]
         assert (await call("edit_scheduled", id=m["id"], text="x"))[0]
 
-        # Catching up: one line per message, voice notes with their transcript, formatting reduced to text.
-        hours_ago = (datetime.now(timezone.utc) - timedelta(hours=3)).isoformat()
-        err, news = await call("get_new_messages", since=hours_ago)
-        assert not err and "Discord: connection_required" in news["warning"] and news["next_since"], news
-        by_chat = {c["chat_id"]: c["messages"] for c in news["chats"]}
-        assert '[voice note: "Bonjour, ça va ?"]' in next(m for m in by_chat[alice] if "#a3:" in m), by_chat[alice]
-        assert any("· [me] · #a2: Yes! What time?" in m for m in by_chat[alice])
-        bold = next(m for m in by_chat["!bob:beeper.com"] if "#b1:" in m)
-        assert "italic bold code ⏎" in bold and "<" not in bold.split("#b1:")[1], bold
-        assert "!signal-self:beeper.com" not in by_chat  # nothing new there
-        err, news = await call("get_new_messages", since=hours_ago, chat_ids=[alice], max_per_chat=1)
-        assert [c["chat_id"] for c in news["chats"]] == [alice] and len(news["chats"][0]["messages"]) == 1 and news["chats"][0]["older_not_shown"]
-
         # Reading a chat or searching messages: compact cleaned lines, voice notes with their transcript.
         err, chat = await call("list_messages", chatID="!bob:beeper.com")
         assert not err and chat["title"] == "Bob Martin" and [m.split(" · ")[2][:4] for m in chat["messages"]] == ["#b0:", "#b1:"], chat  # oldest first
-        assert "italic bold" in chat["messages"][1] and "<" not in chat["messages"][1].split("#b1:")[1], chat
+        assert "italic bold code ⏎" in chat["messages"][1] and "<" not in chat["messages"][1].split("#b1:")[1], chat
         err, chat = await call("list_messages", chatID=alice)
         assert '[voice note: "Bonjour, ça va ?"]' in next(m for m in chat["messages"] if "#a3:" in m), chat
+        assert any("· [me] · #a2: Yes! What time?" in m for m in chat["messages"]), chat
         assert (await call("list_messages"))[0] and (await call("list_messages", chatID="!gone:beeper.com"))[0]
         err, found = await call("search_messages", query="lunch")
         assert not err and [(c["chat_id"], c["title"]) for c in found["chats"]] == [("!family:beeper.com", "Family 🏡")] and "#f1:" in found["chats"][0]["messages"][0], found

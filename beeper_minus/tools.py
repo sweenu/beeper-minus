@@ -199,32 +199,6 @@ def make_mcp(beeper, db, transcriber):
     def transcripts(chat_id):
         return {r["message_id"]: r["text"] for r in rows(db, "select message_id, text from transcriptions where chat_id = ?", chat_id)}
 
-    @tool
-    async def get_new_messages(since: str, chat_ids: list[str] | None = None, max_chats: int = 25, max_per_chat: int = 30) -> dict[str, Any]:
-        """Everything that arrived since `since`, across chats (or only `chat_ids`), one line per message, oldest first,
-        with voice notes' transcripts. Pass the returned `next_since` as `since` next time."""
-        after, until = datetime.fromtimestamp(ms(since) / 1000, timezone.utc), datetime.now(timezone.utc)
-        max_chats, max_per_chat = min(max(max_chats, 1), 100), min(max(max_per_chat, 1), 200)
-        accounts = await beeper.call("GET", "/v1/accounts")
-        accounts = accounts if isinstance(accounts, list) else accounts.get("items", [])
-        chats = [await beeper.chat(c) for c in chat_ids] if chat_ids else await beeper.chats_since(after)
-
-        async def news(chat):
-            found = [m for m in await beeper.messages_since(chat["id"], after, max_per_chat + 1) if not noise(m)]
-            known = transcripts(chat["id"])
-            lines = [line(m, known.get(m["id"])) for m in reversed(found[:max_per_chat])]
-            return {"chat_id": chat["id"], "title": clean(chat.get("title"), 100), "network": chat.get("network"), "messages": lines} | (
-                {"older_not_shown": True} if len(found) > max_per_chat else {})
-
-        results = [r for r in await asyncio.gather(*map(news, chats[:max_chats])) if r["messages"]]
-        out = {"since": after.isoformat(), "next_since": until.isoformat(), "chats": results}
-        offline = [f"{a.get('network') or a.get('accountID')}: {a['status']}" for a in accounts if a.get("status") not in (None, "connected")]
-        if offline:
-            out["warning"] = "Some accounts are not connected: their new messages may be missing: " + ", ".join(offline)
-        if len(chats) > max_chats:
-            out["more_chats"] = f"{len(chats) - max_chats} more chats have new messages: raise max_chats or pass chat_ids"
-        return out
-
     # --- Beeper's list_messages and search_messages, answered by us: arguments go to the same Beeper API as theirs ---
 
     def lines(items):
