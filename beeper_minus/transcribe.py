@@ -8,7 +8,7 @@ from pathlib import Path
 
 import aiohttp
 
-from .beeper import describe
+from .beeper import describe, ts
 from .db import get_kv, now_ms, rows, set_kv
 
 log = logging.getLogger(__name__)
@@ -81,10 +81,6 @@ def format_note(row, chat):
     secs = row["duration"]
     quoted = "\n".join(f"> {line}" for line in (row["text"] or "(silence)").splitlines())
     return f"🎙 {who} · {chat.get('network', '?')} · {sent} · {secs // 60}:{secs % 60:02} · {row['language'] or '?'}\n{quoted}"
-
-
-def ts(msg):
-    return datetime.fromisoformat(msg["timestamp"])
 
 
 def alias(msg):
@@ -210,23 +206,10 @@ class Transcriber:
 
     async def catch_up(self, since):
         retry = get_kv(self.db, "retry")
-        chats, cursor = [], {}
-        while True:
-            page = await self.beeper.call("GET", "/v1/chats/search", lastActivityAfter=since.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"), limit=200, **cursor)
-            chats += page["items"]
-            if not page.get("hasMore"):
-                break
-            cursor = {"cursor": page["oldestCursor"], "direction": "before"}
+        chats = await self.beeper.chats_since(since)
         found = []
         for chat in chats:
-            cursor = {}
-            while True:
-                page = await self.beeper.call("GET", f"/v1/chats/{chat['id']}/messages", **cursor)
-                found += [m for m in page["items"] if ts(m) > since]
-                oldest = min((ts(m) for m in page["items"]), default=None)
-                if not page.get("hasMore") or oldest is None or oldest <= since:
-                    break
-                cursor = {"cursor": page["oldestCursor"], "direction": "before"}
+            found += await self.beeper.messages_since(chat["id"], since)
         # Everything since then is queued now: failures from here on re-add it. Clear it only once the
         # pages loaded, and only if no failure moved it meanwhile.
         if get_kv(self.db, "retry") == retry:

@@ -60,7 +60,9 @@ def seed():
         voice("a3", "!alice:beeper.com", 6),
         text("a4", "!alice:beeper.com", 5, "Listen to this ☝️"),
     ]
-    messages["!family:beeper.com"] = [text("f1", "!family:beeper.com", 30, "Sunday lunch at noon", sender="Mum")]
+    chats["!family:beeper.com"]["participants"]["items"] = [{"id": "Mum", "fullName": "Mum"}, {"id": "me", "fullName": "Me", "isSelf": True}]
+    messages["!family:beeper.com"] = [text("f1", "!family:beeper.com", 30, "Sunday lunch at noon", sender="Mum")
+                                      | {"reactions": [{"id": "r1", "participantID": "Mum", "reactionKey": "👍"}, {"id": "r2", "participantID": "me", "reactionKey": "👍"}]}]
     messages["!bob:beeper.com"] = [
         text("b0", "!bob:beeper.com", 130, "Is 3 < 5? <3"),
         # Formatted messages arrive as HTML: the formatting renders, nothing else does.
@@ -351,7 +353,8 @@ async def push(app, msg):
     """Deliver a new message like Beeper does: store it and announce it on every socket."""
     app["messages"][msg["chatID"]].append(msg)
     for sock in app["sockets"]:
-        await sock.send_json({"type": "message.upserted", "entries": [copy.deepcopy(msg)]})
+        if not sock.closed:
+            await sock.send_json({"type": "message.upserted", "entries": [copy.deepcopy(msg)]})
 
 
 if __name__ == "__main__":

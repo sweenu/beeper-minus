@@ -1,4 +1,5 @@
 import contextlib
+import hmac
 import logging
 import urllib.parse
 from pathlib import Path
@@ -34,7 +35,7 @@ PASS_REQ = ("Content-Type", "Range", "Accept-Encoding", "If-None-Match", "If-Mod
 PASS_RESP = ("Content-Type", "Content-Length", "Content-Encoding", "Content-Range", "Accept-Ranges", "ETag", "Last-Modified", "Cache-Control")
 
 
-def make_app(beeper, db, transcriber, static_dir, save_token, hosts=("localhost", "127.0.0.1", "::1"), users=None, mcp=False):
+def make_app(beeper, db, transcriber, static_dir, save_token, hosts=("localhost", "127.0.0.1", "::1"), users=None, mcp=False, mcp_token=None):
     async def body(request, *required):
         try:
             data = await request.json()
@@ -172,10 +173,10 @@ def make_app(beeper, db, transcriber, static_dir, save_token, hosts=("localhost"
     # Failures talking to Beeper or the transcription engine go to the web app, instead of a bare 500.
     failures = dict.fromkeys((aiohttp.ClientError, RuntimeError, OSError), bad_gateway)
     app = Starlette(routes=routes, exception_handlers=failures, lifespan=lifespan)
-    return guard(app, hosts, users)
+    return guard(app, hosts, users, mcp_token)
 
 
-def refused(request, hosts, users):
+def refused(request, hosts, users, mcp_token=None):
     # Blocks DNS rebinding: another website pointing its own name at this server's address.
     if request.url.hostname not in hosts:
         return f"unknown host {request.headers.get('host')}: add it to web.allowed_hosts"
@@ -183,6 +184,8 @@ def refused(request, hosts, users):
     login = request.headers.get("Tailscale-User-Login", "").lower()
     if users and login not in users:
         return f"{login or 'this request'} is not in web.allowed_users (open it through tailscale serve)"
+    if mcp_token and request.url.path == "/mcp" and not hmac.compare_digest(request.headers.get("Authorization", "").encode(), f"Bearer {mcp_token}".encode()):
+        return "wrong or missing MCP token (Authorization: Bearer ..., see web.mcp_token_file)"
     # Any website you visit can make your browser send it requests; only the app's own page may change things.
     if request.method not in ("GET", "HEAD", "OPTIONS"):
         site, origin = request.headers.get("Sec-Fetch-Site"), request.headers.get("Origin")
@@ -190,9 +193,9 @@ def refused(request, hosts, users):
             return "cross-site request refused"
 
 
-def guard(app, hosts, users):
+def guard(app, hosts, users, mcp_token=None):
     async def asgi(scope, receive, send):
-        if scope["type"] == "http" and (reason := refused(Request(scope), hosts, users)):
+        if scope["type"] == "http" and (reason := refused(Request(scope), hosts, users, mcp_token)):
             return await PlainTextResponse(reason, 403)(scope, receive, send)
         await app(scope, receive, send)
     return asgi

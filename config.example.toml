@@ -28,6 +28,9 @@ port = 8099
 # (Claude Code: claude mcp add --transport http beeper-minus https://<name>/mcp). Same access rules as the
 # web app, and no login of its own: anything that can reach the app can use it. See SECURITY.md.
 mcp = false
+# Also require this token on /mcp (Authorization: Bearer <token>), e.g. to keep other programs on your
+# laptop out of it: claude mcp add ... --header "Authorization: Bearer $(cat token)".
+# mcp_token_file = "/run/secrets/beeper-minus-mcp-token"
 
 # Send later needs no configuration.
 

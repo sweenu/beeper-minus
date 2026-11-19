@@ -1,4 +1,5 @@
 import urllib.parse
+from datetime import datetime, timezone
 
 import aiohttp
 
@@ -6,6 +7,10 @@ import aiohttp
 def describe(e):
     # Never repr() aiohttp errors: it includes the request headers, so the Beeper token.
     return f"{type(e).__name__}: {e}"
+
+
+def ts(msg):
+    return datetime.fromisoformat(msg["timestamp"])
 
 
 class Beeper:
@@ -37,6 +42,27 @@ class Beeper:
 
     async def send(self, chat_id, text):
         return await self.call("POST", f"/v1/chats/{chat_id}/messages", {"text": text})
+
+    async def chats_since(self, since):
+        """Chats with activity after `since`."""
+        chats, cursor = [], {}
+        while True:
+            page = await self.call("GET", "/v1/chats/search", lastActivityAfter=since.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"), limit=200, **cursor)
+            chats += page["items"]
+            if not page.get("hasMore"):
+                return chats
+            cursor = {"cursor": page["oldestCursor"], "direction": "before"}
+
+    async def messages_since(self, chat_id, since, limit=None):
+        """A chat's messages after `since`, newest first; only the newest `limit` if given."""
+        found, cursor = [], {}
+        while True:
+            page = await self.call("GET", f"/v1/chats/{chat_id}/messages", **cursor)
+            found += [m for m in page["items"] if ts(m) > since]
+            oldest = min((ts(m) for m in page["items"]), default=None)
+            if not page.get("hasMore") or oldest is None or oldest <= since or (limit and len(found) >= limit):
+                return sorted(found, key=ts, reverse=True)[:limit]
+            cursor = {"cursor": page["oldestCursor"], "direction": "before"}
 
     async def close(self):
         await self.http.close()

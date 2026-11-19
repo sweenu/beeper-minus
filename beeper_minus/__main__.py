@@ -18,6 +18,9 @@ async def run(cfg):
     # Without a configured token, the web app's setup screen signs Beeper Server in and saves one here.
     saved = state_dir / "beeper-token"
     token = Path(b["token_file"]).read_text().strip() if b.get("token_file") else saved.exists() and saved.read_text().strip()
+    mcp_token = w.get("mcp_token_file") and Path(w["mcp_token_file"]).read_text().strip()
+    if w.get("mcp_token_file") and not mcp_token:
+        sys.exit(f"{w['mcp_token_file']} (web.mcp_token_file) is empty")
     if not token and not w.get("enable", True):
         sys.exit("No Beeper token: set beeper.token_file, or enable the web app to sign in from its setup screen.")
     beeper = Beeper(b.get("url", "http://127.0.0.1:23373"), token)
@@ -49,7 +52,7 @@ async def run(cfg):
         host = w.get("host", "127.0.0.1")
         hosts = {h.lower() for h in ("localhost", "127.0.0.1", "::1", host, *w.get("allowed_hosts", []))}
         users = {u.lower() for u in w.get("allowed_users", [])}
-        app = web.make_app(beeper, db, transcriber, static, save_token, hosts, users, w.get("mcp", False))
+        app = web.make_app(beeper, db, transcriber, static, save_token, hosts, users, w.get("mcp", False), mcp_token)
         tasks.append(web.server(app, host, w.get("port", 8099)).serve())
     await asyncio.gather(*tasks)
 
