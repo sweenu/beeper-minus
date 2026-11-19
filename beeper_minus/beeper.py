@@ -18,6 +18,7 @@ class Beeper:
 
     def __init__(self, url, token=None):
         self.url = url.rstrip("/")
+        self.mcp_url = f"{self.url}/v0/mcp"  # Beeper's own MCP
         self.http = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60))
         # The web proxy passes bodies through untouched, compressed or not.
         self.raw = aiohttp.ClientSession(auto_decompress=False, timeout=aiohttp.ClientTimeout(total=None, sock_connect=30))
@@ -30,7 +31,8 @@ class Beeper:
 
     async def call(self, method, path, body=None, **query):
         url = self.url + urllib.parse.quote(path)
-        params = [(k, str(v).lower() if isinstance(v, bool) else str(v)) for k, v in query.items() if v is not None]
+        # Lists repeat their key (chatIDs=a&chatIDs=b), as Beeper's own client sends them.
+        params = [(k, str(x).lower() if isinstance(x, bool) else str(x)) for k, v in query.items() if v is not None for x in (v if isinstance(v, list) else [v])]
         async with self.http.request(method, url, json=body, params=params) as r:
             r.raise_for_status()
             if r.content_type != "application/json":

@@ -309,6 +309,14 @@ def make_app(state="ready"):
         find(request.match_info["id"])
         return web.json_response({"items": list(reversed(messages[request.match_info["id"]])), "hasMore": False})
 
+    @routes.get("/v1/messages/search")
+    async def search_messages(request):
+        words, only = request.query.get("query", "").lower().split(), request.query.getall("chatIDs", [])
+        found = [m for cid, ms in messages.items() if not only or cid in only for m in ms if all(w in (m.get("text") or "").lower() for w in words)]
+        found.sort(key=lambda m: m["timestamp"], reverse=True)
+        found = found[:int(request.query.get("limit", 20))]
+        return web.json_response({"items": found, "chats": {m["chatID"]: chats[m["chatID"]] for m in found}, "hasMore": False})
+
     @routes.get("/v1/chats/{id}/messages/{mid}")
     async def get_message(request):
         for m in messages[find(request.match_info["id"])["id"]]:

@@ -229,7 +229,7 @@ async def main():
                 break
         listener.cancel()
         assert rows(back_db, "select 1 from transcriptions where message_id = 'f5'"), ("missed note never transcribed", state)
-    await mcp_tools(api, db, fake, alice)
+    await mcp_tools(api, db, fake, alice, beeper)
     await beeper.close()
     await stop()
     await fake_runner.cleanup()
@@ -274,14 +274,20 @@ def fake_beeper_mcp():
     def send_message(chat_id: str, text: str) -> str:
         return f"sent {text!r} to {chat_id}"
 
+    # Beeper Minus answers these two itself, with Beeper's description and parameters.
     @server.tool()
-    def list_messages(chat_id: str) -> str:
-        """Read a chat's messages."""
-        return "[]"
+    def list_messages(chatID: str, cursor: str = "", direction: str = "") -> str:
+        """List messages from a specific chat with pagination support."""
+        raise AssertionError("answered by Beeper Minus")
 
     @server.tool()
-    def read_chat(chat_id: str) -> str:  # Beeper adding a tool we already have
-        return "Beeper's read_chat"
+    def search_messages(query: str = "", chatIDs: list[str] | None = None) -> str:
+        """Search messages across chats."""
+        raise AssertionError("answered by Beeper Minus")
+
+    @server.tool()
+    def list_scheduled() -> str:  # Beeper adding a tool we already have
+        return "Beeper's list_scheduled"
 
     app = server.streamable_http_app(streamable_http_path="/v0/mcp", stateless_http=True)
 
@@ -299,14 +305,12 @@ async def beeper_tools(static):
     stop = await serve(bm_web.make_app(beeper, open_db(":memory:"), None, static, None, mcp=True), 23393)
     async with Client("http://127.0.0.1:23393/mcp") as ai:
         tools = {t.name: t for t in (await ai.list_tools()).tools}
-        assert {"send_message", "read_chat", "list_scheduled"} <= tools.keys() and "chat_id" in tools["send_message"].input_schema["properties"], tools
-        # Reading messages with Beeper's tool, the assistant learns where voice notes' text is.
-        assert tools["list_messages"].description.startswith("Read a chat's messages.") and "transcribe_message" in tools["list_messages"].description
-        assert "transcribe_message" not in (tools["send_message"].description or "")
+        assert {"send_message", "list_scheduled"} <= tools.keys() and "chat_id" in tools["send_message"].input_schema["properties"], tools
+        assert "transcripts" in tools["list_messages"].description and "transcripts" not in (tools["send_message"].description or "")
         r = await ai.call_tool("send_message", {"chat_id": "!bob", "text": "hi"})
         assert not r.is_error and r.content[0].text == "sent 'hi' to !bob", r
-        assert (await ai.call_tool("read_chat", {"chat_id": "!bob"})).content[0].text != "Beeper's read_chat"
-        assert not (await ai.call_tool("list_scheduled", {})).is_error
+        r = await ai.call_tool("list_scheduled", {})
+        assert not r.is_error and r.structured_content == {"result": []}, r  # ours, not Beeper's
     await stop_beeper()
     async with Client("http://127.0.0.1:23393/mcp") as ai:
         tools = {t.name for t in (await ai.list_tools()).tools}
@@ -369,16 +373,20 @@ async def setup_flow(static):
         await fake_runner.cleanup()
 
 
-async def mcp_tools(api, db, fake, alice):
-    """An AI assistant reaches transcripts and send later over MCP, like the web app does."""
+async def mcp_tools(api, db, fake, alice, beeper):
+    """An AI assistant reaches transcripts and send later over MCP, like the web app does, next to Beeper's own tools."""
+    stop_beeper_mcp = await serve(fake_beeper_mcp(), 23394)
+    beeper.mcp_url = "http://127.0.0.1:23394/v0/mcp"
     async with Client(f"{api}/mcp") as ai:
         async def call(name, **args):
             r = await ai.call_tool(name, args)
             return r.is_error, (r.content[0].text if r.is_error else r.structured_content.get("result", r.structured_content))
 
-        names = {t.name for t in (await ai.list_tools()).tools}
-        assert names == {"search_transcriptions", "transcribe_message", "list_scheduled", "schedule_message", "edit_scheduled", "unschedule",
-                         "get_new_messages", "get_reactions", "wait_for_message", "read_chat"}, names  # no Beeper MCP here
+        tools = {t.name: t for t in (await ai.list_tools()).tools}
+        assert tools.keys() == {"search_transcriptions", "transcribe_message", "list_scheduled", "schedule_message", "edit_scheduled", "unschedule",
+                                "get_new_messages", "get_reactions", "wait_for_message", "send_message", "list_messages", "search_messages"}, tools.keys()
+        # Beeper's message tools keep Beeper's parameters and description, and are answered by us.
+        assert tools["list_messages"].input_schema["required"] == ["chatID"] and tools["list_messages"].description.startswith("List messages")
         err, found = await call("search_transcriptions", query="bonjour")
         assert not err and found and all("Bonjour" in t["text"] for t in found) and found[0]["sent_at"].startswith("20"), found
         assert (await call("search_transcriptions", query="bonjour", chat_id="!nobody"))[1] == []
@@ -412,11 +420,17 @@ async def mcp_tools(api, db, fake, alice):
         err, news = await call("get_new_messages", since=hours_ago, chat_ids=[alice], max_per_chat=1)
         assert [c["chat_id"] for c in news["chats"]] == [alice] and len(news["chats"][0]["messages"]) == 1 and news["chats"][0]["older_not_shown"]
 
-        err, chat = await call("read_chat", chat_id="!bob:beeper.com", limit=1)
-        assert not err and chat["title"] == "Bob Martin" and len(chat["messages"]) == 1 and "#b1:" in chat["messages"][0], chat
-        err, chat = await call("read_chat", chat_id="!bob:beeper.com")
-        assert [m.split(" · ")[2][:4] for m in chat["messages"]] == ["#b0:", "#b1:"], chat  # oldest first
-        assert (await call("read_chat", chat_id="!gone:beeper.com"))[0]
+        # Reading a chat or searching messages: compact cleaned lines, voice notes with their transcript.
+        err, chat = await call("list_messages", chatID="!bob:beeper.com")
+        assert not err and chat["title"] == "Bob Martin" and [m.split(" · ")[2][:4] for m in chat["messages"]] == ["#b0:", "#b1:"], chat  # oldest first
+        assert "italic bold" in chat["messages"][1] and "<" not in chat["messages"][1].split("#b1:")[1], chat
+        err, chat = await call("list_messages", chatID=alice)
+        assert '[voice note: "Bonjour, ça va ?"]' in next(m for m in chat["messages"] if "#a3:" in m), chat
+        assert (await call("list_messages"))[0] and (await call("list_messages", chatID="!gone:beeper.com"))[0]
+        err, found = await call("search_messages", query="lunch")
+        assert not err and [(c["chat_id"], c["title"]) for c in found["chats"]] == [("!family:beeper.com", "Family 🏡")] and "#f1:" in found["chats"][0]["messages"][0], found
+        err, found = await call("search_messages", chatIDs=["!bob:beeper.com", "!old:beeper.com"])
+        assert {c["chat_id"] for c in found["chats"]} == {"!bob:beeper.com", "!old:beeper.com"}, found  # lists reach Beeper whole
 
         err, r = await call("get_reactions", chat_id="!family:beeper.com", message_id="f1")
         assert not err and r["reactions"] == [{"reaction": "👍", "count": 2, "people": ["Mum", "[me]"]}] and "Sunday lunch" in r["message"], r
@@ -437,6 +451,7 @@ async def mcp_tools(api, db, fake, alice):
         err, w = await waiting
         assert not err and w["chat"] == "Alice" and "#a9: ok ⏎ 2026-01-01" in w["message"], w
         assert "[me]" not in w["message"] and w["message"].count(" · ") == 2 and "\n" not in w["message"], w
+    await stop_beeper_mcp()
 
 
 def test_end_to_end():
@@ -449,7 +464,7 @@ def test_end_to_end():
     finally:
         logging.getLogger().removeHandler(handler)
     assert "send " in logs.getvalue() and fake_beeper.TOKEN not in logs.getvalue(), "the Beeper token leaked into the logs"
-    assert "Beeper tools hidden by Beeper Minus tools of the same name: read_chat" in logs.getvalue()
+    assert "Beeper tools hidden by Beeper Minus tools of the same name: list_scheduled" in logs.getvalue()
 
 
 if __name__ == "__main__":
