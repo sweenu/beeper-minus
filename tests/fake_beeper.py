@@ -14,6 +14,28 @@ NOTE = "!note:beeper.com"
 AUDIO = Path(__file__).parent / "voice.ogg"
 
 
+def pdf(*lines):
+    """A one-page PDF with these lines of text (none: like a scan)."""
+    text = b" 0 -24 Td ".join(b"(%s) Tj" % s.encode() for s in lines)
+    stream = b"BT /F1 18 Tf 20 100 Td " + text + b" ET" if lines else b""
+    objs = [b"<</Type/Catalog/Pages 2 0 R>>", b"<</Type/Pages/Kids[3 0 R]/Count 1>>",
+            b"<</Type/Page/Parent 2 0 R/MediaBox[0 0 300 144]/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>",
+            b"<</Length %d>>stream\n%s\nendstream" % (len(stream), stream), b"<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>"]
+    out, offsets = b"%PDF-1.4\n", []
+    for i, o in enumerate(objs, 1):
+        offsets.append(len(out))
+        out += b"%d 0 obj\n%s\nendobj\n" % (i, o)
+    xref = b"".join(b"%010d 00000 n \n" % o for o in offsets)
+    return out + b"xref\n0 6\n0000000000 65535 f \n%strailer<</Size 6/Root 1 0 R>>\nstartxref\n%d\n%%%%EOF\n" % (xref, len(out))
+
+
+# A 1x1 PNG.
+PNG = bytes.fromhex("89504e470d0a1a0a0000000d4948445200000001000000010806000000"
+                    "1f15c4890000000d49444154789c6360000002000154a24f5d0000000049454e44ae426082")
+FILES = {"mxc://local/menu": (pdf("1. Couscous", "2. Tajine"), "application/pdf"), "mxc://local/scan": (pdf(), "application/pdf"),
+         "mxc://local/photo": (PNG, "image/png"), "mxc://local/zip": (b"PK\x03\x04", "application/zip")}
+
+
 def iso(minutes_ago):
     return (datetime.now(timezone.utc) - timedelta(minutes=minutes_ago)).isoformat().replace("+00:00", "Z")
 
@@ -62,7 +84,12 @@ def seed():
     ]
     chats["!family:beeper.com"]["participants"]["items"] = [{"id": "Mum", "fullName": "Mum"}, {"id": "me", "fullName": "Me", "isSelf": True}]
     messages["!family:beeper.com"] = [text("f1", "!family:beeper.com", 30, "Sunday lunch at noon", sender="Mum")
-                                      | {"reactions": [{"id": "r1", "participantID": "Mum", "reactionKey": "👍"}, {"id": "r2", "participantID": "me", "reactionKey": "👍"}]}]
+                                      | {"reactions": [{"id": "r1", "participantID": "Mum", "reactionKey": "👍"}, {"id": "r2", "participantID": "me", "reactionKey": "👍"}]},
+                                      text("f0", "!family:beeper.com", 40, "Menu for Sunday, pick a number", sender="Mum") | {"attachments": [
+                                          {"type": "unknown", "id": "mxc://local/menu", "fileName": "menu.pdf", "mimeType": "application/pdf"},
+                                          {"type": "unknown", "id": "mxc://local/scan", "fileName": "scan.pdf", "mimeType": "application/pdf"},
+                                          {"type": "img", "id": "mxc://local/photo", "fileName": "dish.png", "mimeType": "image/png"},
+                                          {"type": "unknown", "id": "mxc://local/zip", "fileName": "recipes.zip"}]}]
     messages["!bob:beeper.com"] = [
         text("b0", "!bob:beeper.com", 130, "Is 3 < 5? <3"),
         # Formatted messages arrive as HTML: the formatting renders, nothing else does.
@@ -339,6 +366,9 @@ def make_app(state="ready"):
 
     @routes.get("/v1/assets/serve")
     async def serve(request):
+        if request.query.get("url") in FILES:
+            data, mime = FILES[request.query["url"]]
+            return web.Response(body=data, content_type=mime)
         return web.FileResponse(AUDIO, headers={"Content-Type": "audio/ogg"})
 
     @routes.get("/v1/ws")

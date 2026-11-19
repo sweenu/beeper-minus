@@ -1,6 +1,7 @@
 """End-to-end check against the fake Beeper: python -m tests.test_app (or pytest)."""
 
 import asyncio
+import base64
 import io
 import logging
 import os
@@ -384,7 +385,7 @@ async def mcp_tools(api, db, fake, alice, beeper):
 
         tools = {t.name: t for t in (await ai.list_tools()).tools}
         assert tools.keys() == {"search_transcriptions", "transcribe_message", "list_scheduled", "schedule_message", "edit_scheduled", "unschedule",
-                                "get_reactions", "wait_for_message", "send_message", "list_messages", "search_messages"}, tools.keys()
+                                "get_reactions", "wait_for_message", "read_attachment", "send_message", "list_messages", "search_messages"}, tools.keys()
         # Beeper's message tools keep Beeper's parameters and description, and are answered by us.
         assert tools["list_messages"].input_schema["required"] == ["chatID"] and tools["list_messages"].description.startswith("List messages")
         err, found = await call("search_transcriptions", query="bonjour")
@@ -415,6 +416,24 @@ async def mcp_tools(api, db, fake, alice, beeper):
         assert '[voice note: "Bonjour, ça va ?"]' in next(m for m in chat["messages"] if "#a3:" in m), chat
         assert any("· [me] · #a2: Yes! What time?" in m for m in chat["messages"]), chat
         assert (await call("list_messages"))[0] and (await call("list_messages", chatID="!gone:beeper.com"))[0]
+        # Attachments: named in the line, and opened as text, image or file.
+        err, chat = await call("list_messages", chatID="!family:beeper.com")
+        assert "[file: menu.pdf] [file: scan.pdf] [image: dish.png] [file: recipes.zip]" in next(m for m in chat["messages"] if "#f0:" in m), chat
+
+        async def attachment(index, message_id="f0", chat_id="!family:beeper.com"):
+            return await ai.call_tool("read_attachment", {"chat_id": chat_id, "message_id": message_id, "index": index})
+
+        r = await attachment(0)
+        assert not r.is_error and r.content[0].text == "1. Couscous\n2. Tajine", r
+        r = await attachment(1)  # a scan: no text, so the PDF itself
+        assert not r.is_error and "no text" in r.content[0].text and base64.b64decode(r.content[1].resource.blob).startswith(b"%PDF"), r
+        r = await attachment(2)
+        assert not r.is_error and r.content[0].type == "image" and base64.b64decode(r.content[0].data) == fake_beeper.PNG, r
+        for index, message_id, chat_id, error in ((3, "f0", "!family:beeper.com", "only PDFs, images and text files"),
+                                                  (9, "f0", "!family:beeper.com", "has 4 attachment(s)"), (0, "a3", alice, "transcribe_message")):
+            r = await attachment(index, message_id, chat_id)
+            assert r.is_error and error in r.content[0].text, (index, r)
+
         err, found = await call("search_messages", query="lunch")
         assert not err and [(c["chat_id"], c["title"]) for c in found["chats"]] == [("!family:beeper.com", "Family 🏡")] and "#f1:" in found["chats"][0]["messages"][0], found
         err, found = await call("search_messages", chatIDs=["!bob:beeper.com", "!old:beeper.com"])

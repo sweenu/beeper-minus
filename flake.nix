@@ -52,6 +52,7 @@
             (pkgs.python3.withPackages (p: [
               p.aiohttp
               p.mcp
+              p.pypdf
               p.starlette
               p.uvicorn
             ]))

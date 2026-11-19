@@ -45,6 +45,7 @@ python3Packages.buildPythonApplication {
   dependencies = with python3Packages; [
     aiohttp
     mcp
+    pypdf
     starlette
     uvicorn
   ];

@@ -45,6 +45,23 @@ class Beeper:
     async def send(self, chat_id, text):
         return await self.call("POST", f"/v1/chats/{chat_id}/messages", {"text": text})
 
+    async def asset(self, att_id, max_bytes):
+        """An attachment's content, or None if it is bigger than max_bytes."""
+        src = (await self.call("POST", "/v1/assets/download", {"url": att_id}))["srcURL"]
+        url = urllib.parse.urlparse(src)
+        if url.scheme == "file":  # Beeper Desktop hands out paths
+            with open(urllib.parse.unquote(url.path), "rb") as f:
+                data = f.read(max_bytes + 1)
+        else:
+            data = b""
+            async with self.http.get(src) as r:
+                r.raise_for_status()
+                async for chunk in r.content.iter_chunked(1 << 16):
+                    data += chunk
+                    if len(data) > max_bytes:
+                        break
+        return None if len(data) > max_bytes else data
+
     async def chats_since(self, since):
         """Chats with activity after `since`."""
         chats, cursor = [], {}

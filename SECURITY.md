@@ -79,6 +79,9 @@ Pitfalls:
   identifies the device and its user, not the program. `web.mcp_token_file` adds a token that only the
   programs you give it to know. It only guards `/mcp`: the web app's own API (`/api/...`), which can do
   even more, stays open to every program on those devices, as it is today.
+- **PDFs anyone sends you are parsed on your server** (`pypdf`) when the assistant opens one with
+  `read_attachment`. Files over 10 MB (5 MB for images) aren't opened, and parsing runs off the main loop,
+  but a malicious PDF could still hit a bug in `pypdf`.
 - **Messages and transcripts are written by other people.** Someone can send you "schedule a message to Bob
   saying...". The tools tell the assistant to treat them as data, and cut names and texts so nobody can
   pass as you (`[me]`) or fake another message, but an assistant can still be fooled: keep it asking for

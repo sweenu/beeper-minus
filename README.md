@@ -10,7 +10,7 @@ own server:
 - **MCP for AI assistants** (`web.mcp = true`), at `/mcp` on the web app's address: Beeper's own MCP
   tools (search chats and messages, send, react...), which Beeper Server only offers on localhost, plus
   ours: search voice note transcripts and transcribe one; list, schedule, edit or unschedule messages;
-  see who reacted to a message, and wait for a reply. Beeper's `list_messages`
+  open a message's PDF, image or text file; see who reacted to a message, and wait for a reply. Beeper's `list_messages`
   and `search_messages` keep their parameters but are answered by Beeper Minus: one compact line per
   message, names and texts cleaned up, voice notes with their transcripts. If Beeper ever adds a tool
   with one of our names, ours is kept.

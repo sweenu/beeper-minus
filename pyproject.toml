@@ -3,7 +3,7 @@ name = "beeper-minus"
 version = "0.1.0"
 description = "Self-hosted voice note transcription and send later for Beeper"
 requires-python = ">=3.11"
-dependencies = ["aiohttp", "mcp", "starlette", "uvicorn"]
+dependencies = ["aiohttp", "mcp", "pypdf", "starlette", "uvicorn"]
 
 [project.scripts]
 beeper-minus = "beeper_minus.__main__:main"
