@@ -169,6 +169,22 @@ def make_mcp(beeper, db, transcriber):
         return out
 
     @tool
+    async def search_chats(query: str) -> list[dict[str, Any]]:
+        """Find chats by name (a person's or a group's), most relevant first. Use the chat_id with the other tools."""
+        page = await beeper.call("GET", "/v1/chats/search", query=query, scope="titles", limit=20)
+        return [{"chat_id": c["id"], "title": clean(c.get("title"), 100), "network": c.get("network"), "type": c.get("type"),
+                 "last_activity": c.get("lastActivity")} for c in page["items"]]
+
+    @tool
+    async def read_chat(chat_id: str, limit: int = 30) -> dict[str, Any]:
+        """A chat's latest messages, oldest first, one line per message, with voice notes' transcripts."""
+        limit = min(max(limit, 1), 200)
+        chat, found = await asyncio.gather(beeper.chat(chat_id), beeper.messages_since(chat_id, datetime.min.replace(tzinfo=timezone.utc), limit))
+        known = transcripts(chat_id)
+        return {"chat_id": chat_id, "title": clean(chat.get("title"), 100), "network": chat.get("network"),
+                "messages": [line(m, known.get(m["id"])) for m in reversed(found) if not noise(m)]}
+
+    @tool
     async def get_reactions(chat_id: str, message_id: str) -> dict[str, Any]:
         """Who reacted to a message, with what, by name ([me] is the user)."""
         msg, chat = await asyncio.gather(

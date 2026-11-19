@@ -8,8 +8,9 @@ own server:
   optionally posted to your *Note to self*.
 - **Send later**: schedule a message from the chat list or from inside a conversation; edit or unschedule it.
 - **MCP for AI assistants** (`web.mcp = true`), at `/mcp` on the web app's address: search voice note
-  transcripts and transcribe one; list, schedule, edit or unschedule messages; catch up on new messages
-  across chats (with voice notes' transcripts), see who reacted to a message, and wait for a reply.
+  transcripts and transcribe one; list, schedule, edit or unschedule messages; find a chat by name and
+  read it, catch up on new messages across chats (with voice notes' transcripts), see who reacted to a
+  message, and wait for a reply.
 
 It talks to the Beeper Client API served by **Beeper Server** (headless) or Beeper Desktop. It is not a
 Beeper client replacement: the web app only shows your chats and these two features.

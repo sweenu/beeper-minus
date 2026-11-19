@@ -325,7 +325,7 @@ async def mcp_tools(api, db, fake, alice):
 
         names = {t.name for t in (await ai.list_tools()).tools}
         assert names == {"search_transcriptions", "transcribe_message", "list_scheduled", "schedule_message", "edit_scheduled", "unschedule",
-                         "get_new_messages", "get_reactions", "wait_for_message"}, names
+                         "get_new_messages", "get_reactions", "wait_for_message", "search_chats", "read_chat"}, names
         err, found = await call("search_transcriptions", query="bonjour")
         assert not err and found and all("Bonjour" in t["text"] for t in found) and found[0]["sent_at"].startswith("20"), found
         assert (await call("search_transcriptions", query="bonjour", chat_id="!nobody"))[1] == []
@@ -358,6 +358,15 @@ async def mcp_tools(api, db, fake, alice):
         assert "!signal-self:beeper.com" not in by_chat  # nothing new there
         err, news = await call("get_new_messages", since=hours_ago, chat_ids=[alice], max_per_chat=1)
         assert [c["chat_id"] for c in news["chats"]] == [alice] and len(news["chats"][0]["messages"]) == 1 and news["chats"][0]["older_not_shown"]
+
+        # Finding a chat by name, then reading it.
+        err, found = await call("search_chats", query="bob")
+        assert not err and [c["chat_id"] for c in found] == ["!bob:beeper.com"] and found[0]["title"] == "Bob Martin", found
+        err, chat = await call("read_chat", chat_id="!bob:beeper.com", limit=1)
+        assert not err and chat["title"] == "Bob Martin" and len(chat["messages"]) == 1 and "#b1:" in chat["messages"][0], chat
+        err, chat = await call("read_chat", chat_id="!bob:beeper.com")
+        assert [m.split(" · ")[2][:4] for m in chat["messages"]] == ["#b0:", "#b1:"], chat  # oldest first
+        assert (await call("read_chat", chat_id="!gone:beeper.com"))[0]
 
         err, r = await call("get_reactions", chat_id="!family:beeper.com", message_id="f1")
         assert not err and r["reactions"] == [{"reaction": "👍", "count": 2, "people": ["Mum", "[me]"]}] and "Sunday lunch" in r["message"], r
