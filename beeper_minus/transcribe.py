@@ -2,7 +2,6 @@ import asyncio
 import json
 import logging
 import tempfile
-import urllib.parse
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -67,6 +66,7 @@ def openai(cfg):
 
 
 ENGINES = {"whisper-cpp": whisper_cpp, "openai": openai}
+MAX_AUDIO = 100 << 20  # ~4 h of opus; held in memory while it is decoded
 
 
 def audio_attachment(msg):
@@ -104,18 +104,6 @@ class Transcriber:
         self.queue = asyncio.Queue()
         self.busy = False
 
-    async def fetch(self, src, dest):
-        url = urllib.parse.urlparse(src)
-        if url.scheme == "file":
-            return urllib.parse.unquote(url.path)
-        # Beeper Server proxies media over its own HTTP API instead of handing out paths.
-        async with self.beeper.http.get(src) as r:
-            r.raise_for_status()
-            with open(dest, "wb") as f:
-                async for chunk in r.content.iter_chunked(1 << 16):
-                    f.write(chunk)
-        return dest
-
     async def note_chat(self):
         """Your Note to self chat. Beeper's API doesn't flag it, so look for the chat with nobody but you in it."""
         if self.note_chat_id is None:
@@ -144,14 +132,24 @@ class Transcriber:
         att = audio_attachment(msg)
         if att is None:
             raise ValueError("message has no audio")
-        src = await self.beeper.download(att["id"])
         async with self.lock:
             # The worker and the web app can both ask for the same note: do it once, up to the stored row.
-            done = rows(self.db, "select * from transcriptions where chat_id = ? and message_id = ?", msg["chatID"], msg["id"])
+            # Look before downloading: the network may no longer have the audio of a note transcribed long ago.
+            done = rows(self.db, "select * from transcriptions where (chat_id = ?1 and message_id = ?2) or alias = ?3 order by chat_id = ?1 and message_id = ?2 desc",
+                        msg["chatID"], msg["id"], alias(msg))
             if done:
-                return done[0]
+                row = done[0]
+                if (row["chat_id"], row["message_id"]) != (msg["chatID"], msg["id"]):
+                    # The same note under new IDs (see db.py): keep its transcript for them too, without posting it again.
+                    row = {**row, "chat_id": msg["chatID"], "message_id": msg["id"]}
+                    self.store(row)
+                return row
+            data = await self.beeper.asset(att["id"], MAX_AUDIO)
+            if data is None:
+                raise ValueError(f"voice note over {MAX_AUDIO >> 20} MB")
             with tempfile.TemporaryDirectory() as d:
-                path = await self.fetch(src, f"{d}/media")
+                path = Path(d) / "media"
+                path.write_bytes(data)
                 wav = f"{d}/audio.wav"
                 # whisper-cli can't read m4a/caf (Signal, iMessage), so always decode.
                 await run("ffmpeg", "-loglevel", "error", "-i", path, "-ar", "16000", "-ac", "1", wav)
@@ -176,9 +174,12 @@ class Transcriber:
             # Post first: if it fails, no row is stored and the note is retried instead of never posted.
             if self.notes_to_self:
                 await self.beeper.send(await self.note_chat(), format_note(row, chat))
-            self.db.execute(f"insert or replace into transcriptions ({', '.join(row)}) values ({', '.join('?' * len(row))})", tuple(row.values()))
+            self.store(row)
             log.info("transcribed %s/%s (%s)", row["chat_id"], row["message_id"], lang)
             return row
+
+    def store(self, row):
+        self.db.execute(f"insert or replace into transcriptions ({', '.join(row)}) values ({', '.join('?' * len(row))})", tuple(row.values()))
 
     # --- automatic transcription of incoming voice notes ---
 

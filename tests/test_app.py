@@ -30,6 +30,21 @@ echo '{"result":{"language":"fr"},"transcription":[{"text":" Bonjour,"},{"text":
 """
 
 
+class Slow:
+    """Stands in for Beeper's send: takes a moment, or fails with `fail`."""
+
+    def __init__(self):
+        self.sent, self.tries, self.fail, self.started = [], 0, None, asyncio.Event()
+
+    async def send(self, chat_id, text):
+        self.tries += 1
+        self.started.set()
+        await asyncio.sleep(0.1)
+        if self.fail:
+            raise self.fail
+        self.sent.append(text)
+
+
 async def serve(app, port):
     """Run one of our apps under uvicorn; returns its stop()."""
     server = bm_web.server(app, "127.0.0.1", port)
@@ -142,6 +157,23 @@ async def main():
         await scheduler.tick(beeper, db)
         assert not rows(db, "select * from scheduled")
 
+        # Unscheduled or edited while an earlier message was sending: the current row is what counts.
+        slow = Slow()
+        ids = [(await scheduler.add(beeper, db, alice, t, 1))["id"] for t in ("one", "two", "three")]
+        tick = asyncio.create_task(scheduler.tick(slow, db))
+        await slow.started.wait()
+        db.execute("delete from scheduled where id = ?", (ids[1],))
+        scheduler.edit(db, ids[2], text="three, edited")
+        await tick
+        assert slow.sent == ["one", "three, edited"], slow.sent
+        # A send that timed out may have gone through: kept with an error, never sent again on its own.
+        await scheduler.add(beeper, db, alice, "late", 1)
+        slow.fail, slow.tries = TimeoutError(), 0
+        await scheduler.tick(slow, db)
+        await scheduler.tick(slow, db)
+        assert slow.tries == 1 and "may have been sent" in rows(db, "select error from scheduled")[0]["error"], slow.tries
+        db.execute("delete from scheduled")
+
         # Off by default: transcripts stay in the web app, even with a Note to self chat ID set.
         quiet = Transcriber({**cfg, "notes_to_self": False, "notes_to_self_chat_id": fake_beeper.NOTE}, beeper, open_db(":memory:"))
         notes = len(messages[fake_beeper.NOTE])
@@ -176,6 +208,16 @@ async def main():
         notes = len(messages[fake_beeper.NOTE])
         await asyncio.gather(twice.transcribe(messages[alice][2]), twice.transcribe(messages[alice][2]))
         assert len(messages[fake_beeper.NOTE]) == notes + 1, messages[fake_beeper.NOTE][notes:]
+        # Transcribed already, then the network dropped the audio, or gave the note new IDs: the stored
+        # transcript, under the IDs asked for, without downloading or posting again.
+        gone = {**messages[alice][2], "chatID": "!alice-local:beeper.local", "id": "x3",
+                "attachments": [{**messages[alice][2]["attachments"][0], "id": "mxc://local/expired"}]}
+        assert (await twice.transcribe(gone))["text"] == "Bonjour, ça va ?"
+        assert (await twice.transcribe(gone))["message_id"] == "x3" and len(messages[fake_beeper.NOTE]) == notes + 1
+        assert rows(twice.db, "select message_id from transcriptions where chat_id = ?", gone["chatID"]) == [{"message_id": "x3"}]
+        for bad in ("abc", "-1"):
+            async with http.get(f"{api}/api/transcriptions?limit={bad}") as r:
+                assert r.status == 400 or len(await r.json()) == 1, (bad, r.status)
 
     async def idle(until=lambda: True):
         for _ in range(50):

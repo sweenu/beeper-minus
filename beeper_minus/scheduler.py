@@ -10,8 +10,12 @@ log = logging.getLogger(__name__)
 
 
 def permanent(e):
-    # A 4xx won't fix itself by retrying; anything else (Beeper down, 5xx, signed out, rate limited) is retried next tick.
-    return isinstance(e, aiohttp.ClientResponseError) and e.status < 500 and e.status not in (401, 403, 408, 429)
+    """Why retrying won't help, or None: Beeper down, 5xx, signed out and rate limits are retried next tick."""
+    if isinstance(e, aiohttp.ClientResponseError) and e.status < 500 and e.status not in (401, 403, 408, 429):
+        return f"{e.status} {e.message}"
+    # Beeper may have sent it and answered late: retrying could send it twice. Never connected: not sent.
+    if isinstance(e, TimeoutError) and not isinstance(e, aiohttp.ConnectionTimeoutError):
+        return "timed out, it may have been sent: check the chat, then edit it to retry"
 
 
 async def add(beeper, db, chat_id, text, send_at):
@@ -33,14 +37,18 @@ def edit(db, id, text=None, send_at=None):
 
 async def tick(beeper, db):
     now = now_ms()
-    for m in rows(db, "select * from scheduled where send_at <= ? and error is null order by send_at", now):
+    for due in rows(db, "select id from scheduled where send_at <= ? and error is null order by send_at", now):
+        # Read it again: it may have been edited or unscheduled while an earlier one was sending.
+        m = next(iter(rows(db, "select * from scheduled where id = ? and send_at <= ? and error is null", due["id"], now)), None)
+        if m is None:
+            continue
         try:
             await beeper.send(m["chat_id"], m["text"])
         except Exception as e:
             log.warning("send %s to %s: %s", m["id"], m["chat_id"], describe(e))
-            if permanent(e):
+            if reason := permanent(e):
                 # Keep the message so it isn't lost: the web app shows the error and lets you edit or delete it.
-                db.execute("update scheduled set error = ? where id = ?", (f"{e.status} {e.message}", m["id"]))
+                db.execute("update scheduled set error = ? where id = ?", (reason, m["id"]))
             continue
         db.execute("delete from scheduled where id = ?", (m["id"],))
         log.info("sent scheduled message %s to %s", m["id"], m["chat_id"])

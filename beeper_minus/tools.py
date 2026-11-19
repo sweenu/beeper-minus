@@ -354,7 +354,8 @@ def make_mcp(beeper, db, transcriber):
                             await ws.send_json({"type": "subscriptions.set", "chatIDs": [chat_id or "*"]})
                         elif event["type"] == "subscriptions.updated" and since:
                             # Listening already, so nothing falls between the history and the live feed.
-                            earlier = [m for m in await beeper.messages_since(chat_id, after, 50) if wanted(m)]
+                            # All of them, not the newest page: the first one after `since` is the answer.
+                            earlier = [m for m in await beeper.messages_since(chat_id, after) if wanted(m)]
                             if earlier:
                                 return await found(earlier[-1])
                         elif event["type"] == "message.upserted":

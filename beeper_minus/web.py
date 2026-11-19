@@ -123,7 +123,10 @@ def make_app(beeper, db, transcriber, static_dir, save_token, hosts=("localhost"
         chat_id = request.query_params.get("chatID")
         if chat_id:
             return JSONResponse(rows(db, "select * from transcriptions where chat_id = ? order by sent_at", chat_id))
-        limit = min(int(request.query_params.get("limit", "50")), 500)
+        try:
+            limit = max(1, min(int(request.query_params.get("limit", "50")), 500))
+        except ValueError:
+            raise HTTPException(400, "invalid limit")
         return JSONResponse(rows(db, "select * from transcriptions order by created_at desc limit ?", limit))
 
     async def transcribe(request):

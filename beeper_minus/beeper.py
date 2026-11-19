@@ -61,14 +61,14 @@ class Beeper:
             with open(urllib.parse.unquote(url.path), "rb") as f:
                 data = f.read(max_bytes + 1)
         else:
-            data = b""
+            data = bytearray()
             async with self.http.get(src) as r:
                 r.raise_for_status()
                 async for chunk in r.content.iter_chunked(1 << 16):
-                    data += chunk
+                    data.extend(chunk)
                     if len(data) > max_bytes:
                         break
-        return None if len(data) > max_bytes else data
+        return None if len(data) > max_bytes else bytes(data)
 
     async def chats_since(self, since):
         """Chats with activity after `since`."""

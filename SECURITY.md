@@ -135,7 +135,8 @@ Pitfalls:
   outage.
 - **Rejected messages are kept, not lost.** When Beeper refuses one for good (a deleted chat...), it
   stays on the Scheduled page with the error, and editing it retries. Sign-in, permission and
-  rate-limit errors are retried automatically.
+  rate-limit errors are retried automatically. A send that timed out is kept with an error too, not retried:
+  Beeper may have sent it anyway, so check the chat before editing it.
 
 ## Keeping up to date
 
