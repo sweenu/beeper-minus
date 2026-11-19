@@ -45,9 +45,17 @@ class Beeper:
     async def send(self, chat_id, text):
         return await self.call("POST", f"/v1/chats/{chat_id}/messages", {"text": text})
 
+    async def download(self, att_id):
+        """Where to read an attachment from, once Beeper has it."""
+        result = await self.call("POST", "/v1/assets/download", {"url": att_id})
+        # A media file the network no longer has (old messages, often) comes back as {"error": ...}.
+        if not result.get("srcURL"):
+            raise RuntimeError(f"Beeper couldn't download the attachment: {result.get('error') or 'no reason given'}")
+        return result["srcURL"]
+
     async def asset(self, att_id, max_bytes):
         """An attachment's content, or None if it is bigger than max_bytes."""
-        src = (await self.call("POST", "/v1/assets/download", {"url": att_id}))["srcURL"]
+        src = await self.download(att_id)
         url = urllib.parse.urlparse(src)
         if url.scheme == "file":  # Beeper Desktop hands out paths
             with open(urllib.parse.unquote(url.path), "rb") as f:

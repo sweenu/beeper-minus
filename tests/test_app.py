@@ -168,6 +168,9 @@ async def main():
         assert len(messages[fake_beeper.NOTE]) == notes  # done once, not posted again
         async with http.post(f"{api}/api/transcriptions", json={"chatID": alice, "messageID": "a1"}) as r:
             assert r.status == 400  # no audio
+        # An old voice note Beeper can't fetch any more: its reason, not a crash.
+        async with http.post(f"{api}/api/transcriptions", json={"chatID": "!old:beeper.com", "messageID": "expired"}) as r:
+            assert r.status == 502 and "Media is no longer available" in await r.text(), (r.status, await r.text())
         # The worker and a click asking for the same note at once: transcribed and posted once.
         twice = Transcriber({**cfg, "notes_to_self_chat_id": fake_beeper.NOTE}, beeper, open_db(":memory:"))
         notes = len(messages[fake_beeper.NOTE])
@@ -400,6 +403,8 @@ async def mcp_tools(api, db, fake, alice, beeper):
         assert (await call("search_transcriptions", since="2999-01-01T00:00:00Z"))[1] == []
         err, t = await call("transcribe_message", chat_id=alice, message_id="a3")
         assert not err and t["text"] == "Bonjour, ça va ?", t
+        err, msg = await call("transcribe_message", chat_id="!old:beeper.com", message_id="expired")
+        assert err and "Media is no longer available" in msg, msg
 
         # Times need an offset: "9:00" alone could be the server's time zone or the user's.
         assert (await call("schedule_message", chat_id=alice, text="hi", send_at="2999-01-01T09:00"))[0]

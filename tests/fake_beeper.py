@@ -99,7 +99,7 @@ def seed():
              '<img src=x onerror="alert(1)"><script>alert(2)</script><a href="javascript:alert(3)">js link</a> '
              '<a href="https://example.com" onclick="alert(4)">safe link</a> <span style="color:red">Thanks for the help</span>'),
     ]
-    messages["!old:beeper.com"] = [text("o1", "!old:beeper.com", 6000, "Shipped 🎉", sender="Carol")]
+    messages["!old:beeper.com"] = [voice("expired", "!old:beeper.com", 7000, sender="Carol"), text("o1", "!old:beeper.com", 6000, "Shipped 🎉", sender="Carol")]
     return chats, messages
 
 
@@ -364,6 +364,9 @@ def make_app(state="ready"):
 
     @routes.post("/v1/assets/download")
     async def download(request):
+        if (await request.json())["url"] == "mxc://local/expired":
+            # Like Beeper for media the network no longer has: 200, but no file.
+            return web.json_response({"error": "Media is no longer available"})
         return web.json_response({"srcURL": str(request.url.with_path("/v1/assets/serve").with_query(url=(await request.json())["url"]))})
 
     @routes.get("/v1/assets/serve")

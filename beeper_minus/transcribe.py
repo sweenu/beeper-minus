@@ -144,7 +144,7 @@ class Transcriber:
         att = audio_attachment(msg)
         if att is None:
             raise ValueError("message has no audio")
-        src = (await self.beeper.call("POST", "/v1/assets/download", {"url": att["id"]}))["srcURL"]
+        src = await self.beeper.download(att["id"])
         async with self.lock:
             # The worker and the web app can both ask for the same note: do it once, up to the stored row.
             done = rows(self.db, "select * from transcriptions where chat_id = ? and message_id = ?", msg["chatID"], msg["id"])
