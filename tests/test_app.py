@@ -3,6 +3,7 @@
 import asyncio
 import base64
 import io
+import re
 import logging
 import os
 import stat
@@ -287,6 +288,11 @@ def fake_beeper_mcp():
         raise AssertionError("answered by Beeper Minus")
 
     @server.tool()
+    def download_attachment(chatID: str = "", messageID: str = "", index: int = 0, url: str = "") -> str:
+        """Download a message attachment to this computer and return its local file path."""
+        raise AssertionError("answered by Beeper Minus")
+
+    @server.tool()
     def list_scheduled() -> str:  # Beeper adding a tool we already have
         return "Beeper's list_scheduled"
 
@@ -385,7 +391,7 @@ async def mcp_tools(api, db, fake, alice, beeper):
 
         tools = {t.name: t for t in (await ai.list_tools()).tools}
         assert tools.keys() == {"search_transcriptions", "transcribe_message", "list_scheduled", "schedule_message", "edit_scheduled", "unschedule",
-                                "get_reactions", "wait_for_message", "read_attachment", "send_message", "list_messages", "search_messages"}, tools.keys()
+                                "get_reactions", "wait_for_message", "read_attachment", "download_attachment", "send_message", "list_messages", "search_messages"}, tools.keys()
         # Beeper's message tools keep Beeper's parameters and description, and are answered by us.
         assert tools["list_messages"].input_schema["required"] == ["chatID"] and tools["list_messages"].description.startswith("List messages")
         err, found = await call("search_transcriptions", query="bonjour")
@@ -433,6 +439,28 @@ async def mcp_tools(api, db, fake, alice, beeper):
                                                   (9, "f0", "!family:beeper.com", "has 4 attachment(s)"), (0, "a3", alice, "transcribe_message")):
             r = await attachment(index, message_id, chat_id)
             assert r.is_error and error in r.content[0].text, (index, r)
+
+        # Downloading: a link through the web app, and a command that saves it where the assistant runs.
+        assert "curl command" in tools["download_attachment"].description and "this computer and return" not in tools["download_attachment"].description
+        for args in ({"chatID": "!family:beeper.com", "messageID": "f0"}, {"url": "beeper-mcp://attachments/%21family%3Abeeper.com/f0/0"}):
+            err, d = await call("download_attachment", **args)
+            assert not err and d["file_name"] == "menu.pdf" and d["url"] == f"{api}/api/beeper/v1/assets/serve?url=mxc%3A%2F%2Flocal%2Fmenu", d
+            assert d["save_with"] == f"curl -fsSL -o 'menu.pdf' '{d['url']}'", d
+        async with ClientSession() as http, http.get(d["url"]) as r:
+            assert await r.read() == fake_beeper.FILES["mxc://local/menu"][0]
+        err, d = await call("download_attachment", url="mxc://local/zip")
+        assert not err and d["save_with"] == f"curl -fsSL -o 'attachment' '{d['url']}'", d
+        # Someone else picked the file name: it must not be able to run anything when the command is pasted in a shell.
+        err, d = await call("download_attachment", chatID="!family:beeper.com", messageID="f9")
+        assert not err and re.fullmatch(r"[A-Za-z0-9._-]+", d["file_name"]) and d["file_name"].endswith("menu.pdf"), d
+        for args, error in (({}, "pass chatID and messageID"), ({"chatID": "!family:beeper.com", "messageID": "f0", "index": 9}, "has 4 attachment(s)"),
+                            ({"url": "file:///etc/passwd"}, "outside Beeper")):
+            err, msg = await call("download_attachment", **args)
+            assert err and error in msg, (args, msg)
+        # Behind tailscale serve (HTTPS), the link is https too.
+        rpc = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "download_attachment", "arguments": {"url": "mxc://local/menu"}}}
+        async with ClientSession() as http, http.post(f"{api}/mcp", json=rpc, headers={"Accept": "application/json, text/event-stream", "X-Forwarded-Proto": "https"}) as r:
+            assert 'https://127.0.0.1:23398/api/beeper/v1/assets/serve' in await r.text()
 
         err, found = await call("search_messages", query="lunch")
         assert not err and [(c["chat_id"], c["title"]) for c in found["chats"]] == [("!family:beeper.com", "Family 🏡")] and "#f1:" in found["chats"][0]["messages"][0], found

@@ -11,11 +11,11 @@
 stdenv.mkDerivation (finalAttrs: {
   pname = "beeper-server";
   # Feed: https://api.beeper.com/desktop/update-feed.json?bundleID=com.automattic.beeper.server&platform=linux&channel=stable&arch=x64
-  version = "4.3.308";
+  version = "4.3.332";
 
   src = fetchurl {
     url = "https://beeper-desktop.download.beeper.com/builds/beeper-server-${finalAttrs.version}-linux-x64.tar.gz";
-    hash = "sha512-GGw7I7sPvhjQNGLLt3U+lRDg+9jk+eODYIzO6q65TcTbiMMefVT/V0CImuqODCRC0m8fRU9EgmFzPo2YAF4YRg==";
+    hash = "sha512-wMHsjcUdWCyJHDHEc2q+9il5vTtLs2CE/k8jyw66KX0m2NuGGRKHD3MDPeEHxOVry3M6A/kE020qkNJhB2Olqw==";
   };
 
   nativeBuildInputs = [

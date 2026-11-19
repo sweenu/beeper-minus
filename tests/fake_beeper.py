@@ -89,7 +89,9 @@ def seed():
                                           {"type": "unknown", "id": "mxc://local/menu", "fileName": "menu.pdf", "mimeType": "application/pdf"},
                                           {"type": "unknown", "id": "mxc://local/scan", "fileName": "scan.pdf", "mimeType": "application/pdf"},
                                           {"type": "img", "id": "mxc://local/photo", "fileName": "dish.png", "mimeType": "image/png"},
-                                          {"type": "unknown", "id": "mxc://local/zip", "fileName": "recipes.zip"}]}]
+                                          {"type": "unknown", "id": "mxc://local/zip", "fileName": "recipes.zip"}]},
+                                      text("f9", "!family:beeper.com", 45, "same menu", sender="Mum") | {"attachments": [
+                                          {"type": "unknown", "id": "mxc://local/menu", "fileName": "$(touch pwned)'; menu.pdf", "mimeType": "application/pdf"}]}]
     messages["!bob:beeper.com"] = [
         text("b0", "!bob:beeper.com", 130, "Is 3 < 5? <3"),
         # Formatted messages arrive as HTML: the formatting renders, nothing else does.

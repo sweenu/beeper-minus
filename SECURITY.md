@@ -79,6 +79,9 @@ Pitfalls:
   identifies the device and its user, not the program. `web.mcp_token_file` adds a token that only the
   programs you give it to know. It only guards `/mcp`: the web app's own API (`/api/...`), which can do
   even more, stays open to every program on those devices, as it is today.
+- **`download_attachment` hands the assistant a link to the web app** (`/api/beeper/v1/assets/serve?...`),
+  which works for anyone who can open the web app, and a `curl` command to save the file. File names are
+  reduced to letters, digits, `.`, `-` and `_` first, so a name someone chose can't run anything in a shell.
 - **PDFs anyone sends you are parsed on your server** (`pypdf`) when the assistant opens one with
   `read_attachment`. Files over 10 MB (5 MB for images) aren't opened, and parsing runs off the main loop,
   but a malicious PDF could still hit a bug in `pypdf`.

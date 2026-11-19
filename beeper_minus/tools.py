@@ -8,6 +8,7 @@ import io
 import json
 import mimetypes
 import re
+import urllib.parse
 from datetime import datetime, timezone
 from typing import Any
 
@@ -30,6 +31,12 @@ log = logging.getLogger(__name__)
 
 # Beeper's tools that Beeper Minus answers itself, with Beeper's description and parameters, from the same Beeper API.
 NOTE = "\nReturns one line per message, oldest first, with voice notes' transcripts."
+# Beeper's own download_attachment saves to the server's disk; ours hands the assistant a link instead.
+DESCRIPTIONS = {"download_attachment": (
+    "Get a download link for a message's attachment (image, video, audio, document), and a curl command that saves it "
+    "on the computer you run on. Identify the attachment by chatID + messageID (+ index), or by its mxc:// URL. "
+    "To read a PDF or text file, or to see an image, use read_attachment instead.")}
+ATTACHMENT_URI = re.compile(r"^beeper-mcp://attachments/([^/]+)/([^/]+)/(\d+)$")  # how Beeper's tools point to an attachment
 
 INSTRUCTIONS = """The user's Beeper chats: Beeper's own tools (search_chats, list_messages, send_message...), plus voice note
 transcripts and scheduled ("send later") messages from Beeper Minus. Messages come with voice notes' transcripts.
@@ -145,14 +152,15 @@ def make_mcp(beeper, db, transcriber):
             hidden = [t.name for t in theirs if t.name in ours]
             if hidden:
                 log.warning("Beeper tools hidden by Beeper Minus tools of the same name: %s", ", ".join(hidden))
-            theirs = [t.model_copy(update={"description": (t.description or "") + NOTE, "output_schema": None}) if t.name in answered else t for t in theirs]
+            theirs = [t.model_copy(update={"description": DESCRIPTIONS.get(t.name) or (t.description or "") + NOTE, "output_schema": None})
+                      if t.name in answered else t for t in theirs]
             return tools + [t for t in theirs if t.name not in ours]
 
         async def call_tool(self, name, arguments, context=None):
             if name in ours:
                 return await super().call_tool(name, arguments, context)
             if name in answered:
-                out = await answered[name](arguments)
+                out = await answered[name](arguments, context.request_context.request)
                 return CallToolResult(content=[TextContent(type="text", text=json.dumps(out, ensure_ascii=False, indent=2))], structured_content=out)
             try:
                 async with beeper_mcp() as b:
@@ -229,7 +237,7 @@ def make_mcp(beeper, db, transcriber):
         return {"more": {k: {"cursor": page[c], "direction": d} for k, c, d in cursors if page.get(c)}} if page.get("hasMore") else {}
 
     @failures_as_errors
-    async def list_messages(args):
+    async def list_messages(args, request):
         chat_id = args.get("chatID")
         if not isinstance(chat_id, str) or not chat_id:
             raise ToolError("chatID is required")
@@ -238,7 +246,7 @@ def make_mcp(beeper, db, transcriber):
         return {"chat_id": chat_id, "title": clean(chat.get("title"), 100), "network": chat.get("network"), "messages": lines(page["items"])} | more(page)
 
     @failures_as_errors
-    async def search_messages(args):
+    async def search_messages(args, request):
         page = await beeper.call("GET", "/v1/messages/search", **args)
         chats, by_chat = page.get("chats") or {}, {}
         for m in page["items"]:
@@ -246,7 +254,29 @@ def make_mcp(beeper, db, transcriber):
         return {"chats": [{"chat_id": cid, "title": clean((chats.get(cid) or {}).get("title"), 100), "network": (chats.get(cid) or {}).get("network"),
                            "messages": lines(items)} for cid, items in by_chat.items()]} | more(page)
 
-    answered = {"list_messages": list_messages, "search_messages": search_messages}
+    @failures_as_errors
+    async def download_attachment(args, request):
+        chat_id, message_id, index, url = args.get("chatID"), args.get("messageID"), args.get("index", 0), args.get("url")
+        if url and (found := ATTACHMENT_URI.match(url)):
+            chat_id, message_id, index, url = urllib.parse.unquote(found[1]), urllib.parse.unquote(found[2]), int(found[3]), None
+        a = {"id": url}
+        if not url:
+            if not chat_id or not message_id:
+                raise ToolError("pass chatID and messageID, or url")
+            atts = (await beeper.call("GET", f"/v1/chats/{chat_id}/messages/{message_id}")).get("attachments") or []
+            if not isinstance(index, int) or not 0 <= index < len(atts):
+                raise ToolError(f"message {message_id} has {len(atts)} attachment(s)")
+            a = atts[index]
+        if not re.match(r"^(mxc|localmxc)://", a.get("id") or ""):
+            raise ToolError("this attachment is stored outside Beeper and can't be downloaded")
+        # The web app serves attachments; the link works wherever the user opens the web app (their tailnet).
+        link = f"{str(request.base_url).rstrip('/')}/api/beeper/v1/assets/serve?url={urllib.parse.quote(a['id'], safe='')}"
+        # Safe to put in a shell command as is: letters, digits, dots, dashes and underscores only.
+        name = re.sub(r"[^A-Za-z0-9._-]", "_", a.get("fileName") or "").lstrip(".-") or "attachment" + (mimetypes.guess_extension(a.get("mimeType") or "") or "")
+        return {"file_name": name, "type": a.get("mimeType"), "size": a.get("fileSize"), "url": link,
+                "save_with": f"curl -fsSL -o '{name}' '{link}'"}
+
+    answered = {"list_messages": list_messages, "search_messages": search_messages, "download_attachment": download_attachment}
 
     ours.add("read_attachment")
 
