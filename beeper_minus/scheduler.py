@@ -14,6 +14,23 @@ def permanent(e):
     return isinstance(e, aiohttp.ClientResponseError) and e.status < 500 and e.status not in (401, 403, 408, 429)
 
 
+async def add(beeper, db, chat_id, text, send_at):
+    chat = await beeper.chat(chat_id)
+    cur = db.execute(
+        "insert into scheduled (chat_id, chat_title, network, text, send_at, created_at) values (?, ?, ?, ?, ?, ?)",
+        (chat_id, chat.get("title"), chat.get("network"), text, send_at, now_ms()),
+    )
+    return rows(db, "select * from scheduled where id = ?", cur.lastrowid)[0]
+
+
+def edit(db, id, text=None, send_at=None):
+    """Returns the updated row, or None if there is no such message."""
+    sets = {k: v for k, v in (("text", text), ("send_at", send_at)) if v is not None}
+    # Editing is how a failed message gets retried.
+    cur = db.execute(f"update scheduled set {''.join(f'{k} = ?, ' for k in sets)}error = null where id = ?", (*sets.values(), id))
+    return cur.rowcount and rows(db, "select * from scheduled where id = ?", id)[0] or None
+
+
 async def tick(beeper, db):
     now = now_ms()
     for m in rows(db, "select * from scheduled where send_at <= ? and error is null order by send_at", now):

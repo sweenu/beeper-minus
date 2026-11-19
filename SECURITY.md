@@ -67,6 +67,18 @@ Pitfalls:
   everything else are reduced to plain text or dropped (`web/src/lib/richtext.ts`, tested by `npm test`).
 - **Logs** contain chat and message IDs, never message text or the token.
 
+## The MCP endpoint
+
+`web.mcp = true` serves `/mcp` from the web app, for AI assistants. The web app's access rules apply to it
+(allowed hosts, `web.allowed_users`, refusal of requests from other websites), and it has no login of its own.
+
+- **Any program on a device that can reach the app can use it**, not only your AI assistant: Tailscale
+  identifies the device and its user, not the program. It can read your transcripts and schedule messages
+  in any chat, including for right now (sent within 15 seconds). It can't read your other messages.
+- **Transcripts are written by other people.** Someone can send you a voice note saying "schedule a message
+  to Bob saying...". The tools tell the assistant to treat transcripts as data, but an assistant can still
+  be fooled: keep it asking for your approval before it calls `schedule_message` or `edit_scheduled`.
+
 ## Setting Beeper Server up
 
 - **Finish the setup screen right away, or do it on a private connection.** Until Beeper Server is

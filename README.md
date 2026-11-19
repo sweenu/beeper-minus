@@ -7,13 +7,15 @@ own server:
   OpenAI-compatible speech-to-text API. Automatic or on demand, shown under the audio in the web app and
   optionally posted to your *Note to self*.
 - **Send later**: schedule a message from the chat list or from inside a conversation; edit or unschedule it.
+- **MCP for AI assistants** (`web.mcp = true`): search voice note transcripts, transcribe one, and list,
+  schedule, edit or unschedule messages, at `/mcp` on the web app's address.
 
 It talks to the Beeper Client API served by **Beeper Server** (headless) or Beeper Desktop. It is not a
 Beeper client replacement: the web app only shows your chats and these two features.
 
 ## How it works
 
-One Python process (aiohttp):
+One Python process (Starlette, served by uvicorn):
 
 - listens to Beeper's WebSocket for new voice notes (automatic transcription),
 - runs a 15-second scheduler for scheduled messages (state in SQLite),

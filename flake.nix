@@ -49,7 +49,12 @@
       devShells = forAll (pkgs: {
         default = pkgs.mkShell {
           packages = [
-            (pkgs.python3.withPackages (p: [ p.aiohttp ]))
+            (pkgs.python3.withPackages (p: [
+              p.aiohttp
+              p.mcp
+              p.starlette
+              p.uvicorn
+            ]))
             pkgs.nodejs
             pkgs.ffmpeg-headless
           ];

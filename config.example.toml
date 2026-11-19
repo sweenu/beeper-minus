@@ -24,6 +24,10 @@ port = 8099
 # app must only be reached through tailscale serve: requests without the header, or from tagged devices, are
 # refused, and keep `host` on localhost so nobody can send the header themselves.
 # allowed_users = ["you@github"]
+# Serve an MCP endpoint at /mcp, so an AI assistant can search transcripts and schedule messages
+# (Claude Code: claude mcp add --transport http beeper-minus https://<name>/mcp). Same access rules as the
+# web app, and no login of its own: anything that can reach the app can use it. See SECURITY.md.
+mcp = false
 
 # Send later needs no configuration.
 

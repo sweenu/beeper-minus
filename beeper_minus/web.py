@@ -1,14 +1,27 @@
+import contextlib
 import logging
 import urllib.parse
 from pathlib import Path
 
-from aiohttp import web
+import aiohttp
+import uvicorn
+from mcp.server.transport_security import TransportSecuritySettings
+from starlette.applications import Starlette
+from starlette.exceptions import HTTPException
+from starlette.requests import Request
+from starlette.responses import JSONResponse, PlainTextResponse, Response, StreamingResponse
+from starlette.routing import Mount, Route
+from starlette.staticfiles import StaticFiles
 from yarl import URL
 
+from . import scheduler
 from .beeper import describe
-from .db import now_ms, rows
+from .db import rows
+from .tools import make_mcp
 
 log = logging.getLogger(__name__)
+# Stateless MCP logs "Terminating session" after every request.
+logging.getLogger("mcp.server.streamable_http").setLevel(logging.WARNING)
 
 # The browser reaches Beeper only through these, never e.g. /v1/app (login) or /v1/bridges.
 PROXIED = ("/v1/accounts", "/v1/chats", "/v1/messages", "/v1/assets/serve", "/v1/app/setup", "/v1/bridges")
@@ -21,184 +34,176 @@ PASS_REQ = ("Content-Type", "Range", "Accept-Encoding", "If-None-Match", "If-Mod
 PASS_RESP = ("Content-Type", "Content-Length", "Content-Encoding", "Content-Range", "Accept-Ranges", "ETag", "Last-Modified", "Cache-Control")
 
 
-def make_app(beeper, db, transcriber, static_dir, save_token, hosts=("localhost", "127.0.0.1", "::1"), users=None):
-    routes = web.RouteTableDef()
-
+def make_app(beeper, db, transcriber, static_dir, save_token, hosts=("localhost", "127.0.0.1", "::1"), users=None, mcp=False):
     async def body(request, *required):
         try:
             data = await request.json()
         except ValueError:
-            raise web.HTTPBadRequest(text="invalid JSON")
+            raise HTTPException(400, "invalid JSON")
         if not isinstance(data, dict) or any(k not in data for k in required):
-            raise web.HTTPBadRequest(text=f"expected fields: {', '.join(required)}")
+            raise HTTPException(400, f"expected fields: {', '.join(required)}")
         return data
 
     def field(data, key, kind):
         v = data[key]
         # bool is an int subclass, so reject it explicitly.
         if not isinstance(v, kind) or isinstance(v, bool) or (isinstance(v, str) and not v.strip()):
-            raise web.HTTPBadRequest(text=f"invalid {key}")
+            raise HTTPException(400, f"invalid {key}")
         return v
 
-    @routes.post("/api/beeper/v1/app/setup/{step:response|register}")
     async def sign_in(request):
         data = await body(request)
-        async with beeper.http.post(f"{beeper.url}/v1/app/setup/{request.match_info['step']}", json=data) as r:
+        step = request.url.path.rsplit("/", 1)[1]
+        async with beeper.http.post(f"{beeper.url}/v1/app/setup/{step}", json=data) as r:
             if r.status >= 400 or r.content_type != "application/json":
-                return web.Response(status=r.status, body=await r.read(), content_type=r.content_type)
+                return Response(await r.read(), r.status, media_type=r.content_type)
             result = await r.json()
         # Beeper returns the account token once; keep it server-side, the browser never needs it.
         token = (result.get("matrix") or {}).pop("accessToken", None)
         if token:
             save_token(token)
-        return web.json_response(result)
+        return JSONResponse(result)
 
-    @routes.route("*", "/api/beeper/{tail:.*}")
     async def proxy(request):
-        path = request.raw_path[len("/api/beeper"):]
+        # Forward the path exactly as sent (still percent-encoded), with its query.
+        path = request.scope["raw_path"].decode()[len("/api/beeper"):]
+        if request.scope["query_string"]:
+            path += "?" + request.scope["query_string"].decode()
         plain = urllib.parse.unquote(path).lower()
         if not path.startswith(PROXIED) or ".." in plain or (plain.startswith("/v1/bridges") and LOGINS in plain.split("?")[0] and request.method != "GET"):
-            raise web.HTTPForbidden()
+            raise HTTPException(403)
         # Beeper may match routes case-insensitively or decoded, so compare the same way.
-        if RESET in urllib.parse.unquote(path).lower() and (await beeper.call("GET", "/v1/app/setup"))["state"] != "needs-cross-signing-setup":
-            raise web.HTTPForbidden(text="the recovery key can only be created while setting up encryption")
+        if RESET in plain and (await beeper.call("GET", "/v1/app/setup"))["state"] != "needs-cross-signing-setup":
+            raise HTTPException(403, "the recovery key can only be created while setting up encryption")
         headers = {k: request.headers[k] for k in PASS_REQ if k in request.headers}
-        data = await request.read() if request.can_read_body else None
-        async with beeper.raw.request(request.method, URL(beeper.url + path, encoded=True), headers=headers, data=data) as r:
-            headers = {k: r.headers[k] for k in PASS_RESP if k in r.headers}
-            # Attachments are served from this origin: an .html or .svg someone sends you must not run as the app.
-            headers |= {"Content-Security-Policy": "sandbox", "X-Content-Type-Options": "nosniff"}
-            resp = web.StreamResponse(status=r.status, headers=headers)
-            await resp.prepare(request)
-            async for chunk in r.content.iter_chunked(1 << 16):
-                await resp.write(chunk)
-            await resp.write_eof()
-            return resp
+        r = await beeper.raw.request(request.method, URL(beeper.url + path, encoded=True), headers=headers, data=await request.body() or None)
+        headers = {k: r.headers[k] for k in PASS_RESP if k in r.headers}
+        # Attachments are served from this origin: an .html or .svg someone sends you must not run as the app.
+        headers |= {"Content-Security-Policy": "sandbox", "X-Content-Type-Options": "nosniff"}
 
-    @routes.get("/api/config")
+        async def stream():
+            try:
+                async for chunk in r.content.iter_chunked(1 << 16):
+                    yield chunk
+            finally:
+                r.release()
+
+        return StreamingResponse(stream(), r.status, headers)
+
     async def config(request):
-        return web.json_response({"transcription": transcriber is not None, "token": "Authorization" in beeper.http.headers})
-
-    async def chat_info(chat_id):
-        chat = await beeper.chat(chat_id)
-        return chat.get("title"), chat.get("network")
+        return JSONResponse({"transcription": transcriber is not None, "token": "Authorization" in beeper.http.headers})
 
     # --- send later ---
 
-    @routes.get("/api/scheduled")
     async def list_scheduled(request):
-        return web.json_response(rows(db, "select * from scheduled order by send_at"))
+        return JSONResponse(rows(db, "select * from scheduled order by send_at"))
 
-    @routes.post("/api/scheduled")
     async def schedule(request):
         data = await body(request, "chatID", "text", "sendAt")
-        chat_id, text, send_at = field(data, "chatID", str), field(data, "text", str), field(data, "sendAt", int)
-        title, network = await chat_info(chat_id)
-        cur = db.execute(
-            "insert into scheduled (chat_id, chat_title, network, text, send_at, created_at) values (?, ?, ?, ?, ?, ?)",
-            (chat_id, title, network, text, send_at, now_ms()),
-        )
-        return web.json_response(rows(db, "select * from scheduled where id = ?", cur.lastrowid)[0])
+        return JSONResponse(await scheduler.add(beeper, db, field(data, "chatID", str), field(data, "text", str), field(data, "sendAt", int)))
 
-    @routes.patch("/api/scheduled/{id:\\d+}")
     async def edit_scheduled(request):
         data = await body(request)
-        sets = {}
-        if "text" in data:
-            sets["text"] = field(data, "text", str)
-        if "sendAt" in data:
-            sets["send_at"] = field(data, "sendAt", int)
-        # Editing is how a failed message gets retried.
-        cur = db.execute(
-            f"update scheduled set {''.join(f'{k} = ?, ' for k in sets)}error = null where id = ?",
-            (*sets.values(), int(request.match_info["id"])),
-        )
-        if not cur.rowcount:
-            raise web.HTTPNotFound()
-        return web.json_response(rows(db, "select * from scheduled where id = ?", int(request.match_info["id"]))[0])
+        text = field(data, "text", str) if "text" in data else None
+        send_at = field(data, "sendAt", int) if "sendAt" in data else None
+        row = scheduler.edit(db, request.path_params["id"], text, send_at)
+        if row is None:
+            raise HTTPException(404)
+        return JSONResponse(row)
 
-    @routes.delete("/api/scheduled/{id:\\d+}")
     async def unschedule(request):
-        db.execute("delete from scheduled where id = ?", (int(request.match_info["id"]),))
-        return web.json_response({"ok": True})
+        db.execute("delete from scheduled where id = ?", (request.path_params["id"],))
+        return JSONResponse({"ok": True})
 
     # --- transcriptions ---
 
-    @routes.get("/api/transcriptions")
     async def list_transcriptions(request):
-        chat_id = request.query.get("chatID")
+        chat_id = request.query_params.get("chatID")
         if chat_id:
-            return web.json_response(rows(db, "select * from transcriptions where chat_id = ? order by sent_at", chat_id))
-        limit = min(int(request.query.get("limit", "50")), 500)
-        return web.json_response(rows(db, "select * from transcriptions order by created_at desc limit ?", limit))
+            return JSONResponse(rows(db, "select * from transcriptions where chat_id = ? order by sent_at", chat_id))
+        limit = min(int(request.query_params.get("limit", "50")), 500)
+        return JSONResponse(rows(db, "select * from transcriptions order by created_at desc limit ?", limit))
 
-    @routes.post("/api/transcriptions")
     async def transcribe(request):
         if transcriber is None:
-            raise web.HTTPNotFound(text="transcription is not configured")
+            raise HTTPException(404, "transcription is not configured")
         data = await body(request, "chatID", "messageID")
         chat_id, message_id = field(data, "chatID", str), field(data, "messageID", str)
         msg = await beeper.call("GET", f"/v1/chats/{chat_id}/messages/{message_id}")
         try:
-            return web.json_response(await transcriber.transcribe(msg))
+            return JSONResponse(await transcriber.transcribe(msg))
         except ValueError as e:
-            raise web.HTTPBadRequest(text=str(e))
+            raise HTTPException(400, str(e))
 
     # --- web app ---
 
     index = Path(static_dir) / "index.html"
 
-    @routes.get("/")
     async def home(request):
         # Nix store files all date from 1970, so a browser revalidating would be told its old copy is current.
-        return web.Response(body=index.read_bytes(), content_type="text/html", headers={"Cache-Control": "no-store"})
+        return Response(index.read_bytes(), media_type="text/html", headers={"Cache-Control": "no-store"})
 
-    @web.middleware
-    async def known_host(request, handler):
-        # Blocks DNS rebinding: another website pointing its own name at this server's address.
-        if request.url.host not in hosts:
-            raise web.HTTPForbidden(text=f"unknown host {request.host}: add it to web.allowed_hosts")
-        return await handler(request)
+    routes = [
+        Route("/api/beeper/v1/app/setup/response", sign_in, methods=["POST"]),
+        Route("/api/beeper/v1/app/setup/register", sign_in, methods=["POST"]),
+        Route("/api/beeper/{tail:path}", proxy, methods=["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"]),
+        Route("/api/config", config),
+        Route("/api/scheduled", list_scheduled),
+        Route("/api/scheduled", schedule, methods=["POST"]),
+        Route("/api/scheduled/{id:int}", edit_scheduled, methods=["PATCH"]),
+        Route("/api/scheduled/{id:int}", unschedule, methods=["DELETE"]),
+        Route("/api/transcriptions", list_transcriptions),
+        Route("/api/transcriptions", transcribe, methods=["POST"]),
+        Route("/", home),
+    ]
+    lifespan = None
+    if mcp:
+        mcp_server = make_mcp(beeper, db, transcriber)
+        # Host, user and origin checks are done by guard() below, for the whole app.
+        mcp_app = mcp_server.streamable_http_app(stateless_http=True, transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False))
+        routes += mcp_app.routes
 
-    @web.middleware
-    async def allowed_user(request, handler):
-        # tailscale serve sets this header for tailnet users and strips any value a client sends.
-        login = request.headers.get("Tailscale-User-Login", "").lower()
-        if users and login not in users:
-            raise web.HTTPForbidden(text=f"{login or 'this request'} is not in web.allowed_users (open it through tailscale serve)")
-        return await handler(request)
+        @contextlib.asynccontextmanager
+        async def lifespan(app):
+            async with mcp_server.session_manager.run():
+                yield
 
-    app = web.Application(middlewares=[known_host, allowed_user, same_origin, errors])
-    app.add_routes(routes)
-    app.router.add_static("/", static_dir)
-    return app
+    routes.append(Mount("/", StaticFiles(directory=static_dir)))
+    # Failures talking to Beeper or the transcription engine go to the web app, instead of a bare 500.
+    failures = dict.fromkeys((aiohttp.ClientError, RuntimeError, OSError), bad_gateway)
+    app = Starlette(routes=routes, exception_handlers=failures, lifespan=lifespan)
+    return guard(app, hosts, users)
 
 
-@web.middleware
-async def same_origin(request, handler):
+def refused(request, hosts, users):
+    # Blocks DNS rebinding: another website pointing its own name at this server's address.
+    if request.url.hostname not in hosts:
+        return f"unknown host {request.headers.get('host')}: add it to web.allowed_hosts"
+    # tailscale serve sets this header for tailnet users and strips any value a client sends.
+    login = request.headers.get("Tailscale-User-Login", "").lower()
+    if users and login not in users:
+        return f"{login or 'this request'} is not in web.allowed_users (open it through tailscale serve)"
     # Any website you visit can make your browser send it requests; only the app's own page may change things.
     if request.method not in ("GET", "HEAD", "OPTIONS"):
         site, origin = request.headers.get("Sec-Fetch-Site"), request.headers.get("Origin")
-        if site not in (None, "same-origin", "none") or (origin and urllib.parse.urlsplit(origin).netloc != request.host):
-            raise web.HTTPForbidden(text="cross-site request refused")
-    return await handler(request)
+        if site not in (None, "same-origin", "none") or (origin and urllib.parse.urlsplit(origin).netloc != request.headers.get("host")):
+            return "cross-site request refused"
 
 
-@web.middleware
-async def errors(request, handler):
-    try:
-        return await handler(request)
-    except web.HTTPException:
-        raise
-    except Exception as e:
-        # Surface Beeper/engine failures to the web app instead of a bare 500.
-        log.warning("%s %s: %s", request.method, request.path, describe(e))
-        status = getattr(e, "status", 502)
-        raise web.HTTPBadGateway(text=f"{status}: {getattr(e, 'message', None) or describe(e)}")
+def guard(app, hosts, users):
+    async def asgi(scope, receive, send):
+        if scope["type"] == "http" and (reason := refused(Request(scope), hosts, users)):
+            return await PlainTextResponse(reason, 403)(scope, receive, send)
+        await app(scope, receive, send)
+    return asgi
 
 
-async def serve(app, host, port):
-    runner = web.AppRunner(app)
-    await runner.setup()
-    await web.TCPSite(runner, host, port).start()
-    log.info("web app on http://%s:%d", host, port)
+async def bad_gateway(request, e):
+    log.warning("%s %s: %s", request.method, request.url.path, describe(e))
+    status = getattr(e, "status", 502)
+    return PlainTextResponse(f"{status}: {getattr(e, 'message', None) or describe(e)}", 502)
+
+
+def server(app, host, port):
+    # log_config=None keeps our logging setup.
+    return uvicorn.Server(uvicorn.Config(app, host, port, log_config=None, access_log=False))

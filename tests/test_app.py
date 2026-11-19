@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from aiohttp import ClientResponseError, ClientSession, web
+from mcp.client.client import Client
 
 from beeper_minus import scheduler
 from beeper_minus import web as bm_web
@@ -23,6 +24,19 @@ FAKE_WHISPER = """#!/bin/sh
 while [ $# -gt 0 ]; do [ "$1" = -of ] && out=$2; shift; done
 echo '{"result":{"language":"fr"},"transcription":[{"text":" Bonjour,"},{"text":" ça va ?"}]}' > "$out.json"
 """
+
+
+async def serve(app, port):
+    """Run one of our apps under uvicorn; returns its stop()."""
+    server = bm_web.server(app, "127.0.0.1", port)
+    task = asyncio.create_task(server.serve())
+    while not server.started:
+        await asyncio.sleep(0.01)
+
+    async def stop():
+        server.should_exit = True
+        await task
+    return stop
 
 
 async def main():
@@ -43,9 +57,7 @@ async def main():
     static = tmp / "static"
     static.mkdir()
     (static / "index.html").write_text("<h1>hi</h1>")
-    runner = web.AppRunner(bm_web.make_app(beeper, db, transcriber, static, None))
-    await runner.setup()
-    await web.TCPSite(runner, "127.0.0.1", 23398).start()
+    stop = await serve(bm_web.make_app(beeper, db, transcriber, static, None, mcp=True), 23398)
     api = "http://127.0.0.1:23398"
     chats, messages = fake["chats"], fake["messages"]
     alice, bob = "!alice:beeper.com", "!bob:beeper.com"
@@ -215,8 +227,9 @@ async def main():
                 break
         listener.cancel()
         assert rows(back_db, "select 1 from transcriptions where message_id = 'f5'"), ("missed note never transcribed", state)
+    await mcp_tools(api, db, messages, alice)
     await beeper.close()
-    await runner.cleanup()
+    await stop()
     await fake_runner.cleanup()
     await setup_flow(static)
     await tailscale_users(static)
@@ -225,14 +238,13 @@ async def main():
 
 async def tailscale_users(static):
     """With web.allowed_users, only the listed Tailscale users (as tailscale serve reports them) get in."""
-    runner = web.AppRunner(bm_web.make_app(None, open_db(":memory:"), None, static, None, users={"me@github"}))
-    await runner.setup()
-    await web.TCPSite(runner, "127.0.0.1", 23395).start()
+    stop = await serve(bm_web.make_app(None, open_db(":memory:"), None, static, None, users={"me@github"}, mcp=True), 23395)
     async with ClientSession() as http:
         for login, status in ((None, 403), ("someone@github", 403), ("Me@GitHub", 200)):
-            async with http.get("http://127.0.0.1:23395/api/scheduled", headers={"Tailscale-User-Login": login} if login else {}) as r:
-                assert r.status == status, (login, r.status)
-    await runner.cleanup()
+            for path in ("/api/scheduled", "/mcp"):
+                async with http.post(f"http://127.0.0.1:23395{path}", json={}, headers={"Tailscale-User-Login": login} if login else {}) as r:
+                    assert (r.status == 403) == (status == 403), (login, path, r.status)
+    await stop()
 
 
 async def setup_flow(static):
@@ -250,9 +262,7 @@ async def setup_flow(static):
             beeper.set_token(token)
 
         db = open_db(":memory:")
-        runner = web.AppRunner(bm_web.make_app(beeper, db, None, static, save))
-        await runner.setup()
-        await web.TCPSite(runner, "127.0.0.1", 23396).start()
+        stop = await serve(bm_web.make_app(beeper, db, None, static, save), 23396)
         api = "http://127.0.0.1:23396/api/beeper/v1/app/setup"
         async with ClientSession() as http:
             async with http.get(api) as r:
@@ -286,8 +296,38 @@ async def setup_flow(static):
             async with http.get(api) as r:
                 assert (await r.json())["state"] == "ready"
         await beeper.close()
-        await runner.cleanup()
+        await stop()
         await fake_runner.cleanup()
+
+
+async def mcp_tools(api, db, messages, alice):
+    """An AI assistant reaches transcripts and send later over MCP, like the web app does."""
+    async with Client(f"{api}/mcp") as ai:
+        async def call(name, **args):
+            r = await ai.call_tool(name, args)
+            return r.is_error, (r.content[0].text if r.is_error else r.structured_content.get("result", r.structured_content))
+
+        names = {t.name for t in (await ai.list_tools()).tools}
+        assert names == {"search_transcriptions", "transcribe_message", "list_scheduled", "schedule_message", "edit_scheduled", "unschedule"}, names
+        err, found = await call("search_transcriptions", query="bonjour")
+        assert not err and found and all("Bonjour" in t["text"] for t in found) and found[0]["sent_at"].startswith("20"), found
+        assert (await call("search_transcriptions", query="bonjour", chat_id="!nobody"))[1] == []
+        assert (await call("search_transcriptions", since="2999-01-01T00:00:00Z"))[1] == []
+        err, t = await call("transcribe_message", chat_id=alice, message_id="a3")
+        assert not err and t["text"] == "Bonjour, ça va ?", t
+
+        # Times need an offset: "9:00" alone could be the server's time zone or the user's.
+        assert (await call("schedule_message", chat_id=alice, text="hi", send_at="2999-01-01T09:00"))[0]
+        assert (await call("schedule_message", chat_id=alice, text=" ", send_at="2999-01-01T09:00Z"))[0]
+        err, m = await call("schedule_message", chat_id=alice, text="hi", send_at="2999-01-01T09:00:00+01:00")
+        assert not err and m["chat_title"] == "Alice" and m["send_at"] and m["text"] == "hi", m
+        assert rows(db, "select send_at from scheduled where id = ?", m["id"])[0]["send_at"] == 32472172800000
+        err, m = await call("edit_scheduled", id=m["id"], text="hello")
+        assert not err and m["text"] == "hello" and (await call("list_scheduled"))[1][0]["text"] == "hello"
+        err, msg = await call("schedule_message", chat_id="!gone:beeper.com", text="x", send_at="2999-01-01T09:00Z")
+        assert err and "404" in msg, msg  # Beeper's refusal reaches the assistant
+        assert not (await call("unschedule", id=m["id"]))[0] and (await call("unschedule", id=m["id"]))[0]
+        assert (await call("edit_scheduled", id=m["id"], text="x"))[0]
 
 
 def test_end_to_end():

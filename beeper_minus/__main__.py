@@ -49,8 +49,8 @@ async def run(cfg):
         host = w.get("host", "127.0.0.1")
         hosts = {h.lower() for h in ("localhost", "127.0.0.1", "::1", host, *w.get("allowed_hosts", []))}
         users = {u.lower() for u in w.get("allowed_users", [])}
-        app = web.make_app(beeper, db, transcriber, static, save_token, hosts, users)
-        await web.serve(app, host, w.get("port", 8099))
+        app = web.make_app(beeper, db, transcriber, static, save_token, hosts, users, w.get("mcp", False))
+        tasks.append(web.server(app, host, w.get("port", 8099)).serve())
     await asyncio.gather(*tasks)
 
 

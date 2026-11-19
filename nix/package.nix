@@ -42,7 +42,12 @@ python3Packages.buildPythonApplication {
   };
 
   build-system = [ python3Packages.setuptools ];
-  dependencies = [ python3Packages.aiohttp ];
+  dependencies = with python3Packages; [
+    aiohttp
+    mcp
+    starlette
+    uvicorn
+  ];
 
   nativeCheckInputs = [ ffmpeg-headless ];
   checkPhase = ''
