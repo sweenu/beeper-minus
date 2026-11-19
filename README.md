@@ -7,10 +7,11 @@ own server:
   OpenAI-compatible speech-to-text API. Automatic or on demand, shown under the audio in the web app and
   optionally posted to your *Note to self*.
 - **Send later**: schedule a message from the chat list or from inside a conversation; edit or unschedule it.
-- **MCP for AI assistants** (`web.mcp = true`), at `/mcp` on the web app's address: search voice note
-  transcripts and transcribe one; list, schedule, edit or unschedule messages; find a chat by name and
-  read it, catch up on new messages across chats (with voice notes' transcripts), see who reacted to a
-  message, and wait for a reply.
+- **MCP for AI assistants** (`web.mcp = true`), at `/mcp` on the web app's address: Beeper's own MCP
+  tools (search chats and messages, send, react...), which Beeper Server only offers on localhost, plus
+  ours: search voice note transcripts and transcribe one; list, schedule, edit or unschedule messages;
+  read a chat or catch up across chats with voice notes' transcripts; see who reacted to a message, and
+  wait for a reply. If Beeper ever adds a tool with one of our names, ours is kept.
 
 It talks to the Beeper Client API served by **Beeper Server** (headless) or Beeper Desktop. It is not a
 Beeper client replacement: the web app only shows your chats and these two features.

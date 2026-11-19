@@ -11,6 +11,8 @@ from pathlib import Path
 
 from aiohttp import ClientResponseError, ClientSession, web
 from mcp.client.client import Client
+from mcp.server.mcpserver import MCPServer
+from starlette.responses import PlainTextResponse
 
 from beeper_minus import scheduler
 from beeper_minus import web as bm_web
@@ -233,6 +235,7 @@ async def main():
     await fake_runner.cleanup()
     await setup_flow(static)
     await tailscale_users(static)
+    await beeper_tools(static)
     print("ok")
 
 
@@ -260,6 +263,48 @@ async def tailscale_users(static):
     async with ClientSession() as http:
         async with http.post("http://127.0.0.1:23395/mcp", json={}) as r:
             assert r.status == 404 and "web.mcp = true" in await r.text(), r.status
+    await stop()
+
+
+def fake_beeper_mcp():
+    """Beeper's own MCP, as Beeper Server serves it at /v0/mcp: only with the token."""
+    server = MCPServer("beeper")
+
+    @server.tool()
+    def send_message(chat_id: str, text: str) -> str:
+        return f"sent {text!r} to {chat_id}"
+
+    @server.tool()
+    def read_chat(chat_id: str) -> str:  # Beeper adding a tool we already have
+        return "Beeper's read_chat"
+
+    app = server.streamable_http_app(streamable_http_path="/v0/mcp", stateless_http=True)
+
+    async def asgi(scope, receive, send):
+        if scope["type"] == "http" and dict(scope["headers"]).get(b"authorization") != f"Bearer {fake_beeper.TOKEN}".encode():
+            return await PlainTextResponse("unauthorized", 401)(scope, receive, send)
+        await app(scope, receive, send)
+    return asgi
+
+
+async def beeper_tools(static):
+    """/mcp serves Beeper's own tools next to ours; ours win a name clash; Beeper being away only hides its tools."""
+    stop_beeper = await serve(fake_beeper_mcp(), 23394)
+    beeper = Beeper("http://127.0.0.1:23394", fake_beeper.TOKEN)
+    stop = await serve(bm_web.make_app(beeper, open_db(":memory:"), None, static, None, mcp=True), 23393)
+    async with Client("http://127.0.0.1:23393/mcp") as ai:
+        tools = {t.name: t for t in (await ai.list_tools()).tools}
+        assert {"send_message", "read_chat", "list_scheduled"} <= tools.keys() and "chat_id" in tools["send_message"].input_schema["properties"], tools
+        r = await ai.call_tool("send_message", {"chat_id": "!bob", "text": "hi"})
+        assert not r.is_error and r.content[0].text == "sent 'hi' to !bob", r
+        assert (await ai.call_tool("read_chat", {"chat_id": "!bob"})).content[0].text != "Beeper's read_chat"
+        assert not (await ai.call_tool("list_scheduled", {})).is_error
+    await stop_beeper()
+    async with Client("http://127.0.0.1:23393/mcp") as ai:
+        tools = {t.name for t in (await ai.list_tools()).tools}
+        assert "list_scheduled" in tools and "send_message" not in tools, tools
+        assert (await ai.call_tool("send_message", {"chat_id": "!bob", "text": "hi"})).is_error
+    await beeper.close()
     await stop()
 
 
@@ -325,7 +370,7 @@ async def mcp_tools(api, db, fake, alice):
 
         names = {t.name for t in (await ai.list_tools()).tools}
         assert names == {"search_transcriptions", "transcribe_message", "list_scheduled", "schedule_message", "edit_scheduled", "unschedule",
-                         "get_new_messages", "get_reactions", "wait_for_message", "search_chats", "read_chat"}, names
+                         "get_new_messages", "get_reactions", "wait_for_message", "read_chat"}, names  # no Beeper MCP here
         err, found = await call("search_transcriptions", query="bonjour")
         assert not err and found and all("Bonjour" in t["text"] for t in found) and found[0]["sent_at"].startswith("20"), found
         assert (await call("search_transcriptions", query="bonjour", chat_id="!nobody"))[1] == []
@@ -359,9 +404,6 @@ async def mcp_tools(api, db, fake, alice):
         err, news = await call("get_new_messages", since=hours_ago, chat_ids=[alice], max_per_chat=1)
         assert [c["chat_id"] for c in news["chats"]] == [alice] and len(news["chats"][0]["messages"]) == 1 and news["chats"][0]["older_not_shown"]
 
-        # Finding a chat by name, then reading it.
-        err, found = await call("search_chats", query="bob")
-        assert not err and [c["chat_id"] for c in found] == ["!bob:beeper.com"] and found[0]["title"] == "Bob Martin", found
         err, chat = await call("read_chat", chat_id="!bob:beeper.com", limit=1)
         assert not err and chat["title"] == "Bob Martin" and len(chat["messages"]) == 1 and "#b1:" in chat["messages"][0], chat
         err, chat = await call("read_chat", chat_id="!bob:beeper.com")
@@ -399,6 +441,7 @@ def test_end_to_end():
     finally:
         logging.getLogger().removeHandler(handler)
     assert "send " in logs.getvalue() and fake_beeper.TOKEN not in logs.getvalue(), "the Beeper token leaked into the logs"
+    assert "Beeper tools hidden by Beeper Minus tools of the same name: read_chat" in logs.getvalue()
 
 
 if __name__ == "__main__":

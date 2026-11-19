@@ -72,8 +72,9 @@ Pitfalls:
 `web.mcp = true` serves `/mcp` from the web app, for AI assistants. The web app's access rules apply to it
 (allowed hosts, `web.allowed_users`, refusal of requests from other websites), and it has no login of its own.
 
-- **It reads your messages and sends them.** `get_new_messages` and `wait_for_message` read every chat,
-  and a message scheduled for right now is sent within 15 seconds.
+- **It reads your messages and sends them, right away.** `/mcp` passes Beeper's own MCP tools through
+  (`send_message`, `edit_message`, `delete_message`, `react`, `start_chat`...) with the Beeper Minus token,
+  so the assistant can act as you on every network. Our own tools read every chat too.
 - **Any program on a device that can reach the app can use it**, not only your AI assistant: Tailscale
   identifies the device and its user, not the program. `web.mcp_token_file` adds a token that only the
   programs you give it to know. It only guards `/mcp`: the web app's own API (`/api/...`), which can do
@@ -81,7 +82,7 @@ Pitfalls:
 - **Messages and transcripts are written by other people.** Someone can send you "schedule a message to Bob
   saying...". The tools tell the assistant to treat them as data, and cut names and texts so nobody can
   pass as you (`[me]`) or fake another message, but an assistant can still be fooled: keep it asking for
-  your approval before it calls `schedule_message` or `edit_scheduled`.
+  your approval before any tool that sends, edits, deletes, reacts or schedules.
 
 ## Setting Beeper Server up
 
