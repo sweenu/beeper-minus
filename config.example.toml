@@ -29,7 +29,9 @@ port = 8099
 # web app, and no login of its own: anything that can reach the app can use it. See SECURITY.md.
 mcp = false
 # Also require this token on /mcp (Authorization: Bearer <token>), e.g. to keep other programs on your
-# laptop out of it: claude mcp add ... --header "Authorization: Bearer $(cat token)".
+# laptop out of it: claude mcp add ... --header "Authorization: Bearer $(cat token)". With allowed_users,
+# the token replaces the Tailscale login on /mcp, so an assistant on this same machine can use
+# http://localhost:<port>/mcp.
 # mcp_token_file = "/run/secrets/beeper-minus-mcp-token"
 
 # Send later needs no configuration.

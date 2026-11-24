@@ -189,12 +189,14 @@ def refused(request, hosts, users, mcp_token=None):
     # Blocks DNS rebinding: another website pointing its own name at this server's address.
     if request.url.hostname not in hosts:
         return f"unknown host {request.headers.get('host')}: add it to web.allowed_hosts"
-    # tailscale serve sets this header for tailnet users and strips any value a client sends.
-    login = request.headers.get("Tailscale-User-Login", "").lower()
-    if users and login not in users:
-        return f"{login or 'this request'} is not in web.allowed_users (open it through tailscale serve)"
-    if mcp_token and request.url.path in MCP_PATHS and not hmac.compare_digest(request.headers.get("Authorization", "").encode(), f"Bearer {mcp_token}".encode()):
+    mcp_call = mcp_token and request.url.path in MCP_PATHS
+    if mcp_call and not hmac.compare_digest(request.headers.get("Authorization", "").encode(), f"Bearer {mcp_token}".encode()):
         return "wrong or missing MCP token (Authorization: Bearer ..., see web.mcp_token_file)"
+    # tailscale serve sets this header for tailnet users and strips any value a client sends. The MCP token
+    # stands in for it on /mcp, for assistants on the same machine, which never pass through tailscale serve.
+    login = request.headers.get("Tailscale-User-Login", "").lower()
+    if users and not mcp_call and login not in users:
+        return f"{login or 'this request'} is not in web.allowed_users (open it through tailscale serve)"
     # Any website you visit can make your browser send it requests; only the app's own page may change things.
     if request.method not in ("GET", "HEAD", "OPTIONS"):
         site, origin = request.headers.get("Sec-Fetch-Site"), request.headers.get("Origin")

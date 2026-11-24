@@ -70,7 +70,8 @@ Pitfalls:
 ## The MCP endpoint
 
 `web.mcp = true` serves `/mcp` from the web app, for AI assistants. The web app's access rules apply to it
-(allowed hosts, `web.allowed_users`, refusal of requests from other websites), and it has no login of its own.
+(allowed hosts, `web.allowed_users`, refusal of requests from other websites), and without
+`web.mcp_token_file` it has no login of its own. With one, the token replaces `web.allowed_users` there.
 
 - **It reads your messages and sends them, right away.** `/mcp` passes Beeper's own MCP tools through
   (`send_message`, `edit_message`, `delete_message`, `react`, `start_chat`...) with the Beeper Minus token,
@@ -79,6 +80,10 @@ Pitfalls:
   identifies the device and its user, not the program. `web.mcp_token_file` adds a token that only the
   programs you give it to know. It only guards `/mcp`: the web app's own API (`/api/...`), which can do
   even more, stays open to every program on those devices, as it is today.
+- **With a token, `/mcp` no longer needs `web.allowed_users`' Tailscale login.** An assistant running on
+  the server itself can't go through `tailscale serve`, so the token is what lets it in, from
+  `localhost` too. Anyone who has the token can use `/mcp` from any address that reaches the app: keep
+  the token file as private as the Beeper token.
 - **`download_attachment` hands the assistant a link to the web app** (`/api/beeper/v1/assets/serve?...`),
   which works for anyone who can open the web app, and a `curl` command to save the file. File names are
   reduced to letters, digits, `.`, `-` and `_` first, so a name someone chose can't run anything in a shell.

@@ -42,7 +42,7 @@ for a headless "transcribe into Note to self" setup.
 > app's own page, so other websites you visit can't send messages through it.
 >
 > With `tailscale serve` in front, `web.allowed_users` turns on a real login: only the Tailscale users
-> listed get in.
+> listed get in. On `/mcp`, `web.mcp_token_file`'s token replaces that login when set.
 
 ## NixOS
 

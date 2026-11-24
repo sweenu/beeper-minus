@@ -305,6 +305,20 @@ async def tailscale_users(static):
         async with http.get("http://127.0.0.1:23395/api/scheduled") as r:
             assert r.status == 200
     await stop()
+    # With both, the token is enough on /mcp (an assistant on the server itself has no Tailscale login),
+    # and still required with a login; everything else keeps wanting the login.
+    stop = await serve(bm_web.make_app(None, open_db(":memory:"), None, static, None, users={"me@github"}, mcp=True, mcp_token="s3cret"), 23395)
+    async with ClientSession() as http:
+        for path, headers, refused in (
+            ("/mcp", {"Authorization": "Bearer s3cret"}, False),
+            ("/mcp", {"Authorization": "Bearer wrong"}, True),
+            ("/mcp", {"Tailscale-User-Login": "me@github"}, True),
+            ("/api/scheduled", {"Authorization": "Bearer s3cret"}, True),
+            ("/api/scheduled", {"Tailscale-User-Login": "me@github"}, False),
+        ):
+            async with http.post(f"http://127.0.0.1:23395{path}", json={}, headers=headers) as r:
+                assert (r.status == 403) == refused, (path, headers, r.status)
+    await stop()
     # MCP off: say so, rather than a puzzling 405 from the static files.
     stop = await serve(bm_web.make_app(None, open_db(":memory:"), None, static, None), 23395)
     async with ClientSession() as http:
